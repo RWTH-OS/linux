@@ -453,7 +453,7 @@ int __init hermit_init(void)
 	pr_notice("Initialize HermitCore\n");
 	pr_notice("HermitCore trampoline at 0x%p (0x%zx)\n", hermit_trampoline, (size_t) virt_to_phys(hermit_trampoline));
 	pr_notice("Number of available nodes: %d\n", num_possible_nodes());
-	pr_notice("Pool size: 0x%zx\n", pool_size);
+	pr_notice("Pool size: 0x%zd KiB\n", pool_size / 1024);
 
 	/* allocate for each HermitCore instance */
 	for(i=0; i<num_possible_nodes(); i++) {
