@@ -98,15 +98,16 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter)
 	memcpy(hermit_trampoline, boot_code, sizeof(boot_code));
 
 	/* relocate code */
-	*((unsigned short*) (hermit_trampoline+0x04)) += (unsigned short) start_eip;
-	*((unsigned int*) (hermit_trampoline+0x10)) += start_eip;
-	*((unsigned int*) (hermit_trampoline+0x29)) += start_eip;
-	*((unsigned int*) (hermit_trampoline+0x2E)) += start_eip;
-	*((unsigned int*) (hermit_trampoline+0x3A)) += start_eip;
-	*((unsigned int*) (hermit_trampoline+0x72)) += start_eip;
-	*((unsigned int*) (hermit_trampoline+0xCE)) += virt_to_phys(hermit_base[isle]);
-	*((unsigned int*) (hermit_trampoline+0x180)) += start_eip;
-	*((unsigned int*) (hermit_trampoline+0x185)) += start_eip;
+	*((uint16_t*) (hermit_trampoline+0x04)) += (unsigned short) start_eip;
+	*((uint32_t*) (hermit_trampoline+0x10)) += start_eip;
+	*((uint32_t*) (hermit_trampoline+0x29)) += start_eip;
+	*((uint32_t*) (hermit_trampoline+0x2E)) += start_eip;
+	*((uint32_t*) (hermit_trampoline+0x3A)) += start_eip;
+	*((uint64_t*) (hermit_trampoline+0x5A)) += (uint64_t) start_eip;
+	*((uint32_t*) (hermit_trampoline+0xCE)) += (uint32_t) (virt_to_phys(hermit_base[isle]) & 0xFFFFFFFF);
+	*((uint32_t*) (hermit_trampoline+0xDD)) += (uint32_t) (virt_to_phys(hermit_base[isle]) >> 32);
+	*((uint32_t*) (hermit_trampoline+0x188)) += start_eip;
+	*((uint32_t*) (hermit_trampoline+0x18D)) += start_eip;
 
 	if (!cpu_counter) {
 		struct file * file;
@@ -144,7 +145,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter)
 		 * set base, limit and cpu frequency in HermitCore's kernel
 		 */
 		*((uint64_t*) (hermit_base[isle] + 0x08)) = (uint64_t) virt_to_phys(hermit_base[isle]);
-		*((uint64_t*) (hermit_base[isle] + 0x10)) = (uint64_t) virt_to_phys(hermit_base[isle] + pool_size / num_possible_nodes()); 
+		*((uint64_t*) (hermit_base[isle] + 0x10)) = (uint64_t) virt_to_phys(hermit_base[isle]) + pool_size / num_possible_nodes();
 		*((uint32_t*) (hermit_base[isle] + 0x18)) = cpu_khz / 1000;
 		*((uint32_t*) (hermit_base[isle] + 0x1C)) = cpu;
 	}
