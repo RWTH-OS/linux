@@ -255,7 +255,7 @@ static int shutdown_hermit_core(unsigned cpu)
 	if (x2apic_enabled()) {
 		uint64_t dest = ((uint64_t)cpu << 32);
 
-		wrmsrl(0x830, dest|APIC_INT_ASSERT|APIC_DM_FIXED|122);
+		wrmsrl(0x830, dest|APIC_INT_ASSERT|APIC_DM_FIXED|(81+32));
 	} else {
 		int j;
 
@@ -265,7 +265,7 @@ static int shutdown_hermit_core(unsigned cpu)
 		}
 
 		set_ipi_dest(cpu);
-		apic_write(APIC_ICR, APIC_INT_ASSERT|APIC_DM_FIXED|122);
+		apic_write(APIC_ICR, APIC_INT_ASSERT|APIC_DM_FIXED|(81+32));
 
 		j = 0;
 		while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (j < 1000))
