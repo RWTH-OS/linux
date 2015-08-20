@@ -73,7 +73,7 @@ static inline void set_ipi_dest(uint32_t cpu_id)
 /*
  * Wake up a core and boot HermitCore on it
  */
-static int boot_hermit_core(int cpu, int isle, int cpu_counter)
+static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 {
 	int i;
 	unsigned int start_eip;
@@ -91,8 +91,6 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter)
 		pr_notice("ERROR: previous send not complete");
 		return -EIO;
 	}
-
-	arch_spin_lock(&boot_lock);
 
 	/* intialize trampoline code */
 	memcpy(hermit_trampoline, boot_code, sizeof(boot_code));
@@ -148,7 +146,11 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter)
 		*((uint64_t*) (hermit_base[isle] + 0x10)) = (uint64_t) virt_to_phys(hermit_base[isle]) + pool_size / num_possible_nodes();
 		*((uint32_t*) (hermit_base[isle] + 0x18)) = cpu_khz / 1000;
 		*((uint32_t*) (hermit_base[isle] + 0x1C)) = cpu;
+		*((uint32_t*) (hermit_base[isle] + 0x24)) = total_cpus;
+		*((uint64_t*) (hermit_base[isle] + 0x38)) = sz;
 	}
+
+	*((uint32_t*) (hermit_base[isle] + 0x30)) = cpu;
 
 	local_irq_disable();
 
@@ -203,8 +205,6 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter)
 	cpu_counter++;
 	while(*((volatile uint32_t*) (hermit_base[isle] + 0x20)) < cpu_counter) { cpu_relax(); }
 
-	arch_spin_unlock(&boot_lock);
-
 	return ((apic_read(APIC_ICR) & APIC_ICR_BUSY) ? -EIO : 0); // did it fail (still delivering) or succeed ?
 }
 
@@ -246,6 +246,43 @@ static ssize_t hermit_is_cpus(struct kobject *kobj, struct kobj_attribute *attr,
 		return sprintf(buf, "%d\n", start);
 }
 
+static int shutdown_hermit_core(unsigned cpu)
+{
+	int ret = -EIO;
+
+	local_irq_disable();
+
+	if (x2apic_enabled()) {
+		uint64_t dest = ((uint64_t)cpu << 32);
+
+		wrmsrl(0x830, dest|APIC_INT_ASSERT|APIC_DM_FIXED|122);
+	} else {
+		int j;
+
+		if (apic_read(APIC_ICR) & APIC_ICR_BUSY) {
+			pr_notice("ERROR: previous send not complete");
+			goto Lerr;
+		}
+
+		set_ipi_dest(cpu);
+		apic_write(APIC_ICR, APIC_INT_ASSERT|APIC_DM_FIXED|122);
+
+		j = 0;
+		while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (j < 1000))
+			j++; // wait for it to finish, give up eventualy tho
+
+		if (j >= 1000) {
+			pr_notice("ERROR: send not complete");
+			ret = -EBUSY;
+		} else ret = 0;
+	}
+
+Lerr:
+	local_irq_enable();
+
+	return ret;
+}
+
 /*
  * boot or shut down HermitCore
  */
@@ -256,6 +293,7 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 	int start = NR_CPUS, end = NR_CPUS;
 	int i, j, isle = NR_CPUS;
 	int ret;
+	cycles_t tick0, tick1;
 
 	if (!path)
 		return -EINVAL;
@@ -264,23 +302,30 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 
 	kfree(path);
 
-	/* Do we already boot the isle? */
-	for(i=0; i<NR_CPUS; i++)
-		if (cpu_online[i] == isle)
-			return -EBUSY;
-
 	sscanf(buf, "%d-%d", &start, &end);
 
 	if (end >= NR_CPUS)
 		end = start;
 
-	//pr_notice("Try to boot HermitCore on isle %d (cpu %d - %d)\n", isle, start, end);
-
 	if (start == -1) {
-		/* TODO: add feature to shut down a core */
-		pr_notice("Currently, HermitCore isn't able to set a isle offline\n");
-		return -EINVAL;
+		pr_notice("Try to shutdown HermitCore on isle %d\n", isle);
+
+		arch_spin_lock(&boot_lock);
+
+		// Ok, we have to shutdown the isle
+		for(i=0; i<NR_CPUS; i++)  {
+			if (cpu_online[i] == isle) {
+				if (!shutdown_hermit_core(i))
+					cpu_online[i] = -1;
+			}
+		}
+
+		arch_spin_unlock(&boot_lock);
+
+		return count;
 	}
+
+	//pr_notice("Try to boot HermitCore on isle %d (cpu %d - %d)\n", isle, start, end);
 
 	for(i=start; i<=end; i++) {
 		/* Do Linux or HermitCore already use this CPU ? */
@@ -293,14 +338,24 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 	//TODO: to avoid problems with Linux, we disable the hotplug feature
 	cpu_hotplug_disable();
 
+	tick0 = get_cycles();
+
+	arch_spin_lock(&boot_lock); 
+
 	/* reserve CPU for our isle */
 	for(j=0, i=start; i<=end; i++, j++) {
-		ret = boot_hermit_core(i, isle, j);
+		ret = boot_hermit_core(i, isle, j, end-start+1);
 		if (!ret)
 			cpu_online[i] = isle;
 		else
 			return ret;
 	}
+
+	arch_spin_unlock(&boot_lock);
+
+	tick1 = get_cycles();
+ 
+	pr_notice("HermitCore requires %lld ms (%lld ticks) to boot the system\n", (tick1-tick0) / cpu_khz, tick1-tick0);
 
 	return count;
 }
@@ -322,7 +377,7 @@ static ssize_t hermit_get_log(struct kobject *kobj, struct kobj_attribute *attr,
 	kfree(path);
 
 	if ((isle >= 0) && (isle < NR_CPUS) && hermit_base[isle])
-		return snprintf(buf, 2*PAGE_SIZE, "%s\n", hermit_base[isle]+PAGE_SIZE);
+		return snprintf(buf, 2*PAGE_SIZE, "%s\n", hermit_base[isle]+5*PAGE_SIZE);
 
 	return -ENOMEM;
 }
