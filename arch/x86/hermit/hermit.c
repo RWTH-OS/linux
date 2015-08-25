@@ -432,9 +432,9 @@ static ssize_t hermit_get_base(struct kobject *kobj, struct kobj_attribute *attr
  * and the HermitCore kernel
  *
  * Usage:
- * Boot CPUX             : echo 1 > /sys/hermit/isleX/cpus 
+ * Boot CPU X            : echo 1 > /sys/hermit/isleX/cpus 
  * Boot CPU X-Y		 : echo 1-2 > /sys/hermit/isleX/cpus
- * Shut down all CPUs    : echo 0 > /sys/hermit/isleX/online
+ * Shut down all CPUs    : echo -1 > /sys/hermit/isleX/online
  * Show log messages     : cat /sys/hermit/log 
  * Start address         : cat /sys/hermit/base
  * Memory size           : cat /sys/hermit/memsize
