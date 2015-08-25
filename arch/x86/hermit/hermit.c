@@ -51,7 +51,7 @@
 
 static struct kobject *hermit_kobj = NULL;
 static struct kobject *isle_kobj[NR_CPUS] = {[0 ... NR_CPUS-1] = NULL};
-static int cpu_online[NR_CPUS] = {[0 ... NR_CPUS-1] = -1};
+static int hcpu_online[NR_CPUS] = {[0 ... NR_CPUS-1] = -1};
 static char path2hermit[NAME_SIZE] = "/hermit.bin";
 static char* hermit_base[1 << NODES_SHIFT] = {[0 ... (1 << NODES_SHIFT)-1] = NULL};
 static arch_spinlock_t boot_lock = __ARCH_SPIN_LOCK_UNLOCKED;
@@ -164,7 +164,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 	if (x2apic_enabled()) {
 		uint64_t dest = ((uint64_t)cpu << 32);
 
-		pr_notice("X2APIC is enabled\n");
+		//pr_notice("X2APIC is enabled\n");
 
 		wrmsrl(0x800 + (APIC_ICR >> 4), dest|APIC_INT_LEVELTRIG|APIC_INT_ASSERT|APIC_DM_INIT);
 		udelay(200);
@@ -178,7 +178,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		wrmsrl(0x800 + (APIC_ICR >> 4), dest|APIC_DM_STARTUP|(start_eip >> 12));
 		udelay(200);
 	} else {
-		pr_notice("X2APIC is disabled\n");
+		//pr_notice("X2APIC is disabled\n");
 
 		set_ipi_dest(cpu);
 		apic_write(APIC_ICR, APIC_INT_LEVELTRIG|APIC_INT_ASSERT|APIC_DM_INIT);
@@ -216,7 +216,7 @@ static ssize_t hermit_is_cpus(struct kobject *kobj, struct kobj_attribute *attr,
 {
 	char* path = kobject_get_path(kobj, GFP_KERNEL);
 	int i, isle = NR_CPUS;
-	int start;
+	int ret;
 
 	if (!path)
 		return -EINVAL;
@@ -225,25 +225,19 @@ static ssize_t hermit_is_cpus(struct kobject *kobj, struct kobj_attribute *attr,
 
 	kfree(path);
 
-	for(i=0; (i<NR_CPUS) && (cpu_online[i] != isle); i++)
-		;
+	for(i=0, ret=0; i<NR_CPUS; i++){
+		if (!ret && (hcpu_online[i] == isle))
+			ret += sprintf(buf+ret, "%d", i);
+		else if (hcpu_online[i] == isle)
+			ret += sprintf(buf+ret, ", %d", i);
+	}
 
-	if (i >= NR_CPUS) 
-		return sprintf(buf, "%d", -1);
+	if (!ret) 
+		return sprintf(buf, "%d\n", -1);
 
-	start = i;
-	for(; (i < NR_CPUS) && (cpu_online[i] == isle); i++)
-		;
+	ret += sprintf(buf+ret, "\n");
 
-	if (i >= NR_CPUS)
-		i = NR_CPUS-1;
-	else
-		i--;
-
-	if ((i != start) && (cpu_online[i] == isle))
-		return sprintf(buf, "%d-%d\n", start, i);
-	else
-		return sprintf(buf, "%d\n", start);
+	return ret;
 }
 
 static int shutdown_hermit_core(unsigned cpu)
@@ -290,10 +284,10 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
  				const char *buf, size_t count)
 {
 	char* path = kobject_get_path(kobj, GFP_KERNEL);
-	int start = NR_CPUS, end = NR_CPUS;
-	int i, j, isle = NR_CPUS;
-	int ret;
+	int i, isle = NR_CPUS;
+	int ret, possible_cpus;
 	cycles_t tick0, tick1;
+	int cpus[NR_CPUS];
 
 	if (!path)
 		return -EINVAL;
@@ -302,21 +296,23 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 
 	kfree(path);
 
-	sscanf(buf, "%d-%d", &start, &end);
+	get_options(buf, NR_CPUS, cpus);
 
-	if (end >= NR_CPUS)
-		end = start;
+	// How many cpus do we activate?
+	possible_cpus = cpus[0];
+	if ((possible_cpus <= 0) || (possible_cpus >= NR_CPUS))
+		return -EINVAL;
 
-	if (start == -1) {
+	if (cpus[1] < 0) {
 		pr_notice("Try to shutdown HermitCore on isle %d\n", isle);
 
 		arch_spin_lock(&boot_lock);
 
 		// Ok, we have to shutdown the isle
 		for(i=0; i<NR_CPUS; i++)  {
-			if (cpu_online[i] == isle) {
+			if (hcpu_online[i] == isle) {
 				if (!shutdown_hermit_core(i))
-					cpu_online[i] = -1;
+					hcpu_online[i] = -1;
 			}
 		}
 
@@ -325,14 +321,16 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 		return count;
 	}
 
-	//pr_notice("Try to boot HermitCore on isle %d (cpu %d - %d)\n", isle, start, end);
+	pr_notice("Try to boot HermitCore on isle %d (%d cpus)\n", isle, cpus[0]);
 
-	for(i=start; i<=end; i++) {
-		/* Do Linux or HermitCore already use this CPU ? */
-		if (!(!cpu_online(i) && (cpu_online[i] == -1))) {
-			pr_notice("CPU %d is already online\n", i);
+	/* Do Linux or HermitCore already use the CPUs? */
+	for(i=0; i<possible_cpus; i++) {
+		if ((cpus[i+1] < 0) || (cpus[i+1] >= NR_CPUS))
 			return -EINVAL;
-		}
+		if (hcpu_online[cpus[i+1]] == isle)
+			return -EBUSY;
+		if (cpu_online(cpus[i+1])) 
+			return -EINVAL;
 	}
 
 	//TODO: to avoid problems with Linux, we disable the hotplug feature
@@ -343,12 +341,10 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 	arch_spin_lock(&boot_lock); 
 
 	/* reserve CPU for our isle */
-	for(j=0, i=start; i<=end; i++, j++) {
-		ret = boot_hermit_core(i, isle, j, end-start+1);
+	for(i=0; i<possible_cpus; i++) {
+		ret = boot_hermit_core(cpus[i+1], isle, i, possible_cpus);
 		if (!ret)
-			cpu_online[i] = isle;
-		else
-			return ret;
+			hcpu_online[cpus[i+1]] = isle;
 	}
 
 	arch_spin_unlock(&boot_lock);
