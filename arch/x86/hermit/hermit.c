@@ -498,6 +498,7 @@ int __init hermit_init(void)
 	int i, ret;
 	char name[NAME_SIZE];
 	phys_addr_t mem;
+	ulong flags = choose_memblock_flags();
 
 	if (!enable_hermit)
 		return 0;
@@ -509,7 +510,7 @@ int __init hermit_init(void)
 
 	/* allocate for each HermitCore instance */
 	for(i=0; i<num_possible_nodes(); i++) {
-		mem = memblock_find_in_range_node(pool_size / num_possible_nodes(), 2 << 20, 4 << 20, MEMBLOCK_ALLOC_ACCESSIBLE, i);
+		mem = memblock_find_in_range_node(pool_size / num_possible_nodes(), 2 << 20, 4 << 20, MEMBLOCK_ALLOC_ACCESSIBLE, i, flags);
 		//mem = memblock_find_in_range(4 << 20, 100<<20, CONFIG_HERMIT_SIZE, 2 << 20);
 		if (!mem) {
 			ret = -ENOMEM;
