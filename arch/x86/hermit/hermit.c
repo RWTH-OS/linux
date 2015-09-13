@@ -147,6 +147,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		*((uint32_t*) (hermit_base[isle] + 0x18)) = cpu_khz / 1000;
 		*((uint32_t*) (hermit_base[isle] + 0x1C)) = cpu;
 		*((uint32_t*) (hermit_base[isle] + 0x24)) = total_cpus;
+		*((uint32_t*) (hermit_base[isle] + 0x34)) = isle;
 		*((uint64_t*) (hermit_base[isle] + 0x38)) = sz;
 	}
 
