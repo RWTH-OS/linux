@@ -44,6 +44,7 @@ extern asmlinkage void deferred_error_interrupt(void);
 
 extern asmlinkage void call_function_interrupt(void);
 extern asmlinkage void call_function_single_interrupt(void);
+extern asmlinkage void mmnif_interrupt(void);
 
 #ifdef CONFIG_TRACING
 /* Interrupt handlers registered during init_IRQ */

@@ -1,1 +1,1 @@
-obj-y		:= hermit.o
+obj-y		:= hermit.o mmnif.o

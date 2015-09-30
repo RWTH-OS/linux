@@ -1,21 +1,33 @@
 /*
- * Copyright (C) 2015, Stefan Lankes <slankes@eonerc.rwth-aachen.de>
- *                     RWTH Aachen University, Germany.
+ * Copyright 2015 Stefan Lankes, RWTH Aachen University
+ * All rights reserved.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * This software is available to you under a choice of one of two
+ * licenses.  You may choose to be licensed under the terms of the GNU
+ * General Public License (GPL) Version 2 (https://www.gnu.org/licenses/gpl-2.0.txt)
+ * or the BSD license below:
  *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
- * NON INFRINGEMENT.  See the GNU General Public License for more
- * details.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *    * Redistributions of source code must retain the above copyright
+ *      notice, this list of conditions and the following disclaimer.
+ *    * Redistributions in binary form must reproduce the above copyright
+ *      notice, this list of conditions and the following disclaimer in the
+ *      documentation and/or other materials provided with the distribution.
+ *    * Neither the name of the University nor the names of its contributors
+ *      may be used to endorse or promote products derived from this
+ *      software without specific prior written permission.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <linux/kobject.h>
@@ -49,6 +61,8 @@
 /* include code to switch from real mode to 64bit mode */
 #include "boot.h"
 
+#include "hermit.h"
+
 static struct kobject *hermit_kobj = NULL;
 static struct kobject *isle_kobj[NR_CPUS] = {[0 ... NR_CPUS-1] = NULL};
 static int hcpu_online[NR_CPUS] = {[0 ... NR_CPUS-1] = -1};
@@ -57,8 +71,46 @@ static char* hermit_base[1 << NODES_SHIFT] = {[0 ... (1 << NODES_SHIFT)-1] = NUL
 static arch_spinlock_t boot_lock = __ARCH_SPIN_LOCK_UNLOCKED;
 static size_t pool_size = 0x80000000ULL;
 
+/* following variable are required for the ethernet driver */
+static unsigned int header_size = PAGE_SIZE;
+static unsigned int heap_size = MMNIF_RX_BUFFERLEN;
+static char* header_phy_start_address = NULL;
+static char* heap_phy_start_address = NULL;
+static void* phy_isle_locks = NULL;
+
 /* tramploline to boot a CPU */
 extern uint8_t* hermit_trampoline;
+
+void hermit_get_mmnif_data(struct mmnif_private* priv)
+{
+	int i;
+
+	priv->header_size = header_size;
+	priv->heap_size = heap_size;
+	priv->header_start_address = phys_to_virt((phys_addr_t)header_phy_start_address);
+	priv->heap_start_address = phys_to_virt((phys_addr_t)heap_phy_start_address);
+	priv->isle_locks = (islelock_t*) phys_to_virt((phys_addr_t)phy_isle_locks);
+
+	for(i=0; i<num_possible_nodes()+1; i++)
+		islelock_init(priv->isle_locks + i);
+
+	/* Linux uses always the id 0 */
+	priv->rx_buff = (mm_rx_buffer_t *) (priv->header_start_address + header_size * (0));
+	priv->rx_heap = (uint8_t*) priv->heap_start_address + heap_size * (0);
+
+	memset((void*)priv->rx_buff, 0x00, header_size);
+	memset((void*)priv->rx_heap, 0x00, heap_size);
+	priv->rx_buff->dcount = MMNIF_MAX_DESCRIPTORS;
+
+	for (i=0; i<MMNIF_MAX_ACCEPTORS; i++)
+	{
+		priv->rx_buff->acceptors[i].stat = MMNIF_ACC_STAT_CLOSED;
+		priv->rx_buff->acceptors[i].nsock = -1;
+		priv->rx_buff->acceptors[i].rsock = -1;
+		priv->rx_buff->acceptors[i].src_ip = 0;
+		priv->rx_buff->acceptors[i].port = 0;
+	}
+}
 
 static inline void set_ipi_dest(uint32_t cpu_id)
 {
@@ -149,6 +201,14 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		*((uint32_t*) (hermit_base[isle] + 0x24)) = total_cpus;
 		*((uint32_t*) (hermit_base[isle] + 0x34)) = isle;
 		*((uint64_t*) (hermit_base[isle] + 0x38)) = sz;
+		*((uint64_t*) (hermit_base[isle] + 0x40)) = (uint64_t) phy_isle_locks;
+		*((uint64_t*) (hermit_base[isle] + 0x48)) = (uint64_t) heap_phy_start_address;
+		*((uint64_t*) (hermit_base[isle] + 0x50)) = (uint64_t) header_phy_start_address;
+		*((uint32_t*) (hermit_base[isle] + 0x58)) = heap_size;
+		*((uint32_t*) (hermit_base[isle] + 0x5c)) = header_size;
+		*((uint32_t*) (hermit_base[isle] + 0x60)) = num_possible_nodes();
+		*((uint64_t*) (hermit_base[isle] + 0x64)) = (uint64_t) heap_phy_start_address;
+		*((uint64_t*) (hermit_base[isle] + 0x6c)) = (uint64_t) header_phy_start_address;
 	}
 
 	*((uint32_t*) (hermit_base[isle] + 0x30)) = cpu;
@@ -233,7 +293,7 @@ static ssize_t hermit_is_cpus(struct kobject *kobj, struct kobj_attribute *attr,
 			ret += sprintf(buf+ret, ", %d", i);
 	}
 
-	if (!ret) 
+	if (!ret)
 		return sprintf(buf, "%d\n", -1);
 
 	ret += sprintf(buf+ret, "\n");
@@ -330,7 +390,7 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 			return -EINVAL;
 		if (hcpu_online[cpus[i+1]] == isle)
 			return -EBUSY;
-		if (cpu_online(cpus[i+1])) 
+		if (cpu_online(cpus[i+1]))
 			return -EINVAL;
 	}
 
@@ -339,7 +399,7 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 
 	tick0 = get_cycles();
 
-	arch_spin_lock(&boot_lock); 
+	arch_spin_lock(&boot_lock);
 
 	/* reserve CPU for our isle */
 	for(i=0; i<possible_cpus; i++) {
@@ -351,7 +411,7 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 	arch_spin_unlock(&boot_lock);
 
 	tick1 = get_cycles();
- 
+
 	pr_notice("HermitCore requires %lld ms (%lld ticks) to boot the system\n", (tick1-tick0) / cpu_khz, tick1-tick0);
 
 	return count;
@@ -433,14 +493,14 @@ static ssize_t hermit_get_base(struct kobject *kobj, struct kobj_attribute *attr
  * and the HermitCore kernel
  *
  * Usage:
- * Boot CPU X            : echo 1 > /sys/hermit/isleX/cpus 
+ * Boot CPU X            : echo 1 > /sys/hermit/isleX/cpus
  * Boot CPU X-Y		 : echo 1-2 > /sys/hermit/isleX/cpus
  * Shut down all CPUs    : echo -1 > /sys/hermit/isleX/online
- * Show log messages     : cat /sys/hermit/log 
+ * Show log messages     : cat /sys/hermit/log
  * Start address         : cat /sys/hermit/base
  * Memory size           : cat /sys/hermit/memsize
  * Set path to HermitCore: echo "/hermit.bin" > /sys/hermit/path
- * Get path to HermitCore: cat /sys/hermit/path 
+ * Get path to HermitCore: cat /sys/hermit/path
  */
 
 static struct kobj_attribute cpu_attribute =
@@ -494,6 +554,11 @@ static int disable_hermit(char *arg)
 }
 early_param("disable_hermit", disable_hermit);
 
+int hermit_is_enabled(void)
+{
+	return enable_hermit;
+}
+
 int __init hermit_init(void)
 {
 	int i, ret;
@@ -527,6 +592,51 @@ int __init hermit_init(void)
 		hermit_base[i] = (char*) phys_to_virt(mem);
 		pr_notice("HermitCore %d at 0x%p (0x%zx)\n", i, hermit_base[i], (size_t) mem);
 	}
+
+	mem = memblock_find_in_range(4 << 20, 4 << 25, heap_size * (num_possible_nodes() + 1), PAGE_SIZE);
+	if (!mem) {
+		ret = -ENOMEM;
+		goto _exit;
+	}
+
+	ret = memblock_reserve(mem, heap_size * (num_possible_nodes() + 1));
+	if (ret) {
+		ret = -ENOMEM;
+		goto _exit;
+	}
+
+	heap_phy_start_address = (char*) mem;
+	pr_notice("HermitCore's mmnif heap at 0x%p\n", heap_phy_start_address);
+
+	mem = memblock_find_in_range(4 << 20, 4 << 25, header_size * (num_possible_nodes() + 1), PAGE_SIZE);
+	if (!mem) {
+		ret = -ENOMEM;
+		goto _exit;
+	}
+
+	ret = memblock_reserve(mem, header_size * (num_possible_nodes() + 1));
+	if (ret) {
+		ret = -ENOMEM;
+		goto _exit;
+	}
+
+	header_phy_start_address = (char*) mem;
+	pr_notice("HermitCore's mmnif header at 0x%p\n", header_phy_start_address);
+
+	mem = memblock_find_in_range(4 << 20, 4 << 25, 4 * sizeof(unsigned int) * (num_possible_nodes() + 1), PAGE_SIZE);
+	if (!mem) {
+		ret = -ENOMEM;
+		goto _exit;
+	}
+
+	ret = memblock_reserve(mem, sizeof(islelock_t) * (num_possible_nodes() + 1));
+	if (ret) {
+		ret = -ENOMEM;
+		goto _exit;
+	}
+
+	phy_isle_locks = (void*) mem;
+	pr_notice("HermitCore's locks are mapped at 0x%p\n", phy_isle_locks);
 
 	/*
 	 * Create a kobject for HermitCore and located
@@ -568,9 +678,57 @@ _exit:
 	if (hermit_kobj)
 		kobject_put(hermit_kobj);
 	for_each_possible_cpu(i) {
-		if (isle_kobj[i]) 
+		if (isle_kobj[i])
 			kobject_put(isle_kobj[i]);
 	}
 
 	return ret;
+}
+
+static int apic_send_ipi(uint64_t dest, uint8_t irq)
+{
+	local_irq_disable();
+
+        if (x2apic_enabled()) {
+                wrmsrl(0x830, (dest << 32)|APIC_INT_ASSERT|APIC_DM_FIXED|irq);
+        } else {
+		uint32_t j;
+
+                if (apic_read(APIC_ICR) & APIC_ICR_BUSY) {
+                        printk("ERROR: previous send not complete");
+                        return -EIO;
+                }
+
+                set_ipi_dest((uint32_t)dest);
+                apic_write(APIC_ICR, APIC_INT_ASSERT|APIC_DM_FIXED|irq);
+
+                j = 0;
+                while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (j < 1000))
+                        j++; // wait for it to finish, give up eventualy tho
+        }
+
+	local_irq_enable();
+
+        return 0;
+}
+
+/* trigger an interrupt on the remote processor
+ * so he knows there is a packet to read
+ */
+int hermit_trigger_irq(int dest)
+{
+	int i, cpu = -1;
+
+	if (dest < 1)
+	 	return -EINVAL;
+
+	for(i=0; (cpu == -1) && (i<NR_CPUS); i++) {
+		if (hcpu_online[i] == dest-1)
+			cpu = i;
+	}
+
+	if (cpu == -1)
+		return -EINVAL;
+
+	return apic_send_ipi(cpu, MMNIF_IRQ);
 }
