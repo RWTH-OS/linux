@@ -226,7 +226,7 @@ static netdev_tx_t mmnif_xmit(struct sk_buff *skb, struct net_device *dev)
 	size_t write_address;
 	uint8_t dest_ip = (iph->daddr >> 24);
 
- 	//pr_notice("mming_xmit: data %p, len %d, dest address %pI4, dest_ip %d\n", skb->data, skb->len-ETH_HLEN, &iph->daddr, (int)dest_ip);
+ 	//pr_notice("mmnif_xmit: data %p, len %d, dest address %pI4, dest_ip %d\n", skb->data, skb->len-ETH_HLEN, &iph->daddr, (int)dest_ip);
 
 	/* allocate memory for the packet in the remote buffer */
 realloc:
@@ -243,7 +243,7 @@ realloc:
 #if 0 /* enable this conditional to look at the data */
 	{
 		int i;
-		printk("len is %i, data:", skb->len);
+		printk("TX len is %i, data:", skb->len);
 		for (i=0 /*ETH_HLEN*/; i<skb->len; i++)
 			printk(" %02x",skb->data[i]&0xff);
 		printk("\n");
@@ -361,6 +361,7 @@ static int mmnif_rx(struct net_device *dev, struct mmnif_private *priv)
 	struct sk_buff *skb;
 	bypass_rxdesc_t *bp;
 
+anotherpacket:
 	rdesc = 0xFF;
 
 	/* check if this call to mmnif_rx makes any sense
@@ -467,7 +468,7 @@ static int mmnif_rx(struct net_device *dev, struct mmnif_private *priv)
 #if 0 /* enable this conditional to look at the data */
 	{
 		int i;
-		printk("len is %i, data:", skb->len);
+		printk("RX len is %i, data:", skb->len);
 		for (i=0 /*ETH_HLEN*/; i<skb->len; i++)
 			printk(" %02x",skb->data[i]&0xff);
 		printk("\n");
@@ -480,12 +481,11 @@ static int mmnif_rx(struct net_device *dev, struct mmnif_private *priv)
 	npackets++;
 	priv->stats.rx_packets++;
 	priv->stats.rx_bytes += length;
+	goto anotherpacket;
 
 drop_packet:
 	/* TODO: error handling */
 	priv->stats.rx_dropped++;
-	priv->check_in_progress = 0;
-	return npackets;
 
 out:
 	priv->check_in_progress = 0;
@@ -526,10 +526,9 @@ static void mmnif_setup(struct net_device *dev)
 	dev->hard_header_len	= ETH_HLEN;	/* 14	*/
 	dev->addr_len		= ETH_ALEN;	/* 6	*/
 	dev->tx_queue_len	= 0;
-	dev->flags		= IFF_NOARP;
+	dev->flags		|= IFF_NOARP;
 	dev->flags		&= ~IFF_MULTICAST;
-	dev->netdev_ops		= &mmnif_ops;
-	dev->features 		= /*NETIF_F_SG | NETIF_F_FRAGLIST |*/ NETIF_F_IP_CSUM;
+	//dev->features 		|= NETIF_F_HW_CSUM;
 	dev->ethtool_ops	= &mmnif_ethtool_ops;
 	dev->header_ops		= &mmnif_header_ops;
 	dev->netdev_ops		= &mmnif_ops;
