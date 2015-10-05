@@ -87,20 +87,11 @@ typedef struct bypass_rxdesc {
 } bypass_rxdesc_t;
 static bypass_rxdesc_t mmnif_hashtable[MMNIF_HASHTABLE_SIZE];
 
-static u32 always_on(struct net_device *dev)
-{
-	return 1;
-}
+extern u32 mmnif_link(struct net_device *dev);
 
 static const struct ethtool_ops mmnif_ethtool_ops = {
-	.get_link		= always_on,
+	.get_link		= mmnif_link,
 };
-
-// static void mmnif_dev_free(struct net_device *dev)
-// {
-// 	free_percpu(dev->lstats);
-// 	free_netdev(dev);
-// }
 
 /* mmnif_hashlookup(): looks up a bypass descriptor by
  * the associated socket
@@ -225,8 +216,11 @@ static netdev_tx_t mmnif_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct iphdr* iph = ip_hdr(skb);
 	size_t write_address;
 	uint8_t dest_ip = (iph->daddr >> 24);
+	unsigned long flags;
 
  	//pr_notice("mmnif_xmit: data %p, len %d, dest address %pI4, dest_ip %d\n", skb->data, skb->len-ETH_HLEN, &iph->daddr, (int)dest_ip);
+
+	spin_lock_irqsave(&priv->lock, flags);
 
 	/* allocate memory for the packet in the remote buffer */
 realloc:
@@ -257,10 +251,12 @@ realloc:
 		pr_notice("mmnif_tx(): packet somehow lost during commit\n");
 	}
 
-	hermit_trigger_irq(dest_ip-1);
-
 	priv->stats.tx_packets++;
 	priv->stats.tx_bytes += skb->len-ETH_HLEN;
+
+	spin_unlock_irqrestore(&priv->lock, flags);
+
+	hermit_trigger_irq(dest_ip-1);
 
 	dev_kfree_skb(skb);
 
@@ -488,7 +484,6 @@ drop_packet:
 	priv->stats.rx_dropped++;
 
 out:
-	priv->check_in_progress = 0;
 	return npackets;
 }
 
@@ -507,10 +502,10 @@ asmlinkage __visible void mmnif_handler(void)
 	}
 
 	priv = netdev_priv(mmnif_dev);
-	if (!priv->check_in_progress) {
-		priv->check_in_progress = 1;
-		mmnif_rx(mmnif_dev, priv);
-	}
+
+	spin_lock(&priv->lock);
+	mmnif_rx(mmnif_dev, priv);
+        spin_unlock(&priv->lock);
 
 leave_handler:
 	irq_exit();
@@ -533,7 +528,6 @@ static void mmnif_setup(struct net_device *dev)
 	dev->ethtool_ops	= &mmnif_ethtool_ops;
 	dev->header_ops		= &mmnif_header_ops;
 	dev->netdev_ops		= &mmnif_ops;
-	//dev->destructor		= mmnif_dev_free;
 
 	eth_random_addr(dev->dev_addr);
 }
@@ -560,6 +554,7 @@ static int __init mmnif_init(void)
 
 	priv = netdev_priv(dev);
 	memset(priv, 0, sizeof(struct mmnif_private));
+	spin_lock_init(&priv->lock);
 	priv->dev = dev;
 	hermit_get_mmnif_data(priv);
 
@@ -591,14 +586,12 @@ err_out_free:
 
 static void mmnif_cleanup(void)
 {
-	unregister_netdev(mmnif_dev);
-
-	if (mmnif_dev) {
-		free_percpu(mmnif_dev->lstats);
+	if (mmnif_dev)
+	{
+		unregister_netdev(mmnif_dev);
 		free_netdev(mmnif_dev);
+		mmnif_dev = NULL;
 	}
-
-	mmnif_dev = NULL;
 }
 
 module_init(mmnif_init);

@@ -33,6 +33,7 @@
 #define __HERMIT_H__
 
 #include <linux/netdevice.h>
+#include <linux/spinlock.h>
 
 /*  define constants
  *  regarding the driver & its configuration
@@ -135,12 +136,9 @@ struct mmnif_private {
 	volatile mm_rx_buffer_t *rx_buff;
 	uint8_t *rx_heap;
 
-        // checks the TCPIP thread already the rx buffers?
-        volatile char check_in_progress;
-
         struct net_device_stats stats;
-	struct net_device *dev;
-        struct napi_struct napi;
+        struct net_device *dev;
+        spinlock_t lock;
 };
 
 inline static int islelock_init(islelock_t* s)

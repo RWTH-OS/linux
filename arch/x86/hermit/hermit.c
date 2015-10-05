@@ -81,6 +81,17 @@ static void* phy_isle_locks = NULL;
 /* tramploline to boot a CPU */
 extern uint8_t* hermit_trampoline;
 
+u32 mmnif_link(struct net_device *dev)
+{
+	int i;
+
+	for(i=0; i<NR_CPUS; i++)
+		if (hcpu_online[i] >= 0)
+			return 1;
+
+	return 0;
+}
+
 void hermit_get_mmnif_data(struct mmnif_private* priv)
 {
 	int i;
