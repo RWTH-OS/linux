@@ -528,6 +528,7 @@ static void mmnif_setup(struct net_device *dev)
 	dev->tx_queue_len	= 0;
 	dev->flags		|= IFF_NOARP;
 	dev->flags		&= ~IFF_MULTICAST;
+	dev->flags		&= ~IFF_BROADCAST;
 	//dev->features 		|= NETIF_F_HW_CSUM;
 	dev->ethtool_ops	= &mmnif_ethtool_ops;
 	dev->header_ops		= &mmnif_header_ops;
