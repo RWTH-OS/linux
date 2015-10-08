@@ -44,18 +44,10 @@
 #define MMNIF_STATUS_PENDING            0x01
 #define MMNIF_STATUS_RDY		0x02
 #define MMNIF_STATUS_INPROC		0x03
-#define MMNIF_STATUS_INPROC_BYPASS      0x04
-#define MMNIF_STATUS_PROC		0x05
-
-#define MMNIF_ACC_STAT_CLOSED           0x00
-#define MMNIF_ACC_STAT_ACCEPTING        0x01
-#define MMNIF_ACC_STAT_ACCEPT_ME        0x02
-#define MMNIF_ACC_STAT_ACCEPTED         0x03
+#define MMNIF_STATUS_PROC		0x04
 
 #define MMNIF_RX_BUFFERLEN      	(8*1024)
 #define MMNIF_IRQ                       122
-#define MMNIF_MAX_ACCEPTORS             0x20
-#define MMNIF_MAX_DESCRIPTORS           64
 
 typedef struct islelock {
         /// Internal queue
@@ -64,34 +56,15 @@ typedef struct islelock {
         atomic_t dequeue;
 } islelock_t;
 
-/* accept struct
- */
-typedef struct acceptor {
-	/* stat: status of the acceptor
-	 * src_ip: where did the connect request came from
-	 * port: port on which the acceptor is listening
-	 * nsock : next pseudo socket which is used in further connection
-	 * rsock : remote socket which has to be assosicated with the nsock
-	 */
-	uint8_t stat;
-	uint8_t src_ip;
-	uint16_t port;
-	int nsock;
-	int rsock;
-} acceptor_t;
-
 /* receive descror structure */
 typedef struct rx_desc {
 	/* stat : status of the descriptor
 	 * len  : length of the packet
 	 * addr : memory address of the packet
-	 * fast_sock: (-1) if no socket is associated
-	 *             else the socket n of the fast socket
 	 * id   : packet id
 	 */
 	uint8_t stat;
 	uint16_t len;
-	uint32_t fast_sock;
 	size_t addr;
 } rx_desc_t;
 
@@ -115,12 +88,6 @@ typedef struct mm_rx_buffer {
 	uint8_t dcount;
 	uint8_t dread;
 	uint8_t dwrite;
-
-	/* acceptors
-	 * shared memory "hashtable" to realize
-	 * fast socket accept/connect
-	 */
-	acceptor_t acceptors[MMNIF_MAX_ACCEPTORS];
 } mm_rx_buffer_t;
 
 struct mmnif_private {
@@ -154,11 +121,21 @@ inline static int islelock_destroy(islelock_t* s)
         return 0;
 }
 
+/*
+ * Use a own implementation of "atomic_add_return" to gurantee
+ * that the lock prefix is used.
+ */
+inline static int _hermit_atomic_add(atomic_t *d, int i)
+{
+        int res = i;
+        asm volatile("lock; xaddl %0, %1" : "=r"(i) : "m"(d->counter), "0"(i) : "memory", "cc");
+        return res+i;
+}
 static inline int islelock_lock(islelock_t* s)
 {
 	int ticket;
 
-	ticket = atomic_add_return(1, &s->queue);
+	ticket = _hermit_atomic_add(&s->queue, 1);
 	while(atomic_read(&s->dequeue) != ticket) {
 		cpu_relax();
 	}

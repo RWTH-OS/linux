@@ -66,50 +66,13 @@
 
 #include "hermit.h"
 
-#define MMNIF_HASHTABLE_SIZE            0x20
-
 static struct net_device *mmnif_dev = NULL;
-static arch_spinlock_t pseudolock = __ARCH_SPIN_LOCK_UNLOCKED;
-
-/* bypass descriptor struct
- */
-typedef struct bypass_rxdesc {
-	/* socket : hashtarget
-	 * remote_socket: socket on the remote end
-	 * counter : packet counter
-	 * last_id : last packet id
-	 * dest_ip : associated destination ip/core
-	 */
-	int socket;
-	int remote_socket;
-	struct semaphore sem;
-	uint8_t dest_ip;
-} bypass_rxdesc_t;
-static bypass_rxdesc_t mmnif_hashtable[MMNIF_HASHTABLE_SIZE];
 
 extern u32 mmnif_link(struct net_device *dev);
 
 static const struct ethtool_ops mmnif_ethtool_ops = {
 	.get_link		= mmnif_link,
 };
-
-/* mmnif_hashlookup(): looks up a bypass descriptor by
- * the associated socket
- */
-static bypass_rxdesc_t *mmnif_hashlookup(int s)
-{
-	int i;
-	bypass_rxdesc_t *p;
-
-	for (i=0, p = &mmnif_hashtable[s % MMNIF_HASHTABLE_SIZE]; i<MMNIF_HASHTABLE_SIZE; i++)
-	{
-		if (p->socket == s)
-			return p;
-		p = &mmnif_hashtable[(s + i + 1) % MMNIF_HASHTABLE_SIZE];
-	}
-
-	return 0;
-}
 
 /* mmnif_rxbuff_alloc():
  * this function allocates a continues chunk of memory
@@ -129,7 +92,6 @@ static size_t mmnif_rxbuff_alloc(struct mmnif_private *priv, uint8_t dest, uint1
 //            if ((rb->head - rb->tail < len)&&(rb->tail != rb->head))
 //                return NULL;
 
-	arch_spin_lock(&pseudolock); // only one core should call our islelock
 	islelock_lock(priv->isle_locks + dest);
 	if (rb->dcount)
 	{
@@ -181,7 +143,6 @@ static size_t mmnif_rxbuff_alloc(struct mmnif_private *priv, uint8_t dest, uint1
 		}
 	}
 	islelock_unlock(priv->isle_locks + dest);
-	arch_spin_unlock(&pseudolock);
 
 	return ret;
 }
@@ -201,7 +162,6 @@ static int mmnif_commit_packet(struct mmnif_private *priv, uint8_t dest, size_t 
 		 && (rb->desc_table[i].stat == MMNIF_STATUS_PENDING))
 		{
 			rb->desc_table[i].stat = MMNIF_STATUS_RDY;
-			rb->desc_table[i].fast_sock = -1;
 
 			return 0;
 		}
@@ -231,6 +191,8 @@ realloc:
 
 		cpu_relax();
 		goto realloc;
+		//spin_unlock_irqrestore(&priv->lock, flags);
+		//return NETDEV_TX_BUSY;
 	}
 	dev->trans_start = jiffies; /* save the timestamp */
 
@@ -355,7 +317,6 @@ static int mmnif_rx(struct net_device *dev, struct mmnif_private *priv)
 	uint32_t i, j;
 	uint8_t rdesc;
 	struct sk_buff *skb;
-	bypass_rxdesc_t *bp;
 
 anotherpacket:
 	rdesc = 0xFF;
@@ -374,31 +335,15 @@ anotherpacket:
 		if (b->desc_table[(j + i) % MMNIF_MAX_DESCRIPTORS].stat == MMNIF_STATUS_RDY)
 		{
 			rdesc = (j + i) % MMNIF_MAX_DESCRIPTORS;
-			if (b->desc_table[(j + i) % MMNIF_MAX_DESCRIPTORS].fast_sock == -1)
-			{
-				b->desc_table[rdesc].stat = MMNIF_STATUS_INPROC;
-				packet = (char *)b->desc_table[rdesc].addr;
-				length = b->desc_table[rdesc].len;
-				break;
-			} else {
-				bp = mmnif_hashlookup(b->desc_table[rdesc].fast_sock);
-				if (!bp)
-				{
-					pr_notice("mmnif_rx(): no fast socket associated with %d", b->desc_table[rdesc].fast_sock);
-					priv->rx_buff->desc_table[rdesc].stat = MMNIF_STATUS_PROC;
-					mmnif_rxbuff_free(priv);
-					goto out;
-				} else {
-					b->desc_table[rdesc].stat = MMNIF_STATUS_INPROC;
-					up(&bp->sem);
-					return npackets;
-				}
-			}
+			b->desc_table[rdesc].stat = MMNIF_STATUS_INPROC;
+			packet = (char *)b->desc_table[rdesc].addr;
+			length = b->desc_table[rdesc].len;
+			break;
 		}
 
 		if (b->desc_table[(j + i) % MMNIF_MAX_DESCRIPTORS].stat == MMNIF_STATUS_FREE)
 		{
-			goto out;
+			return npackets;
 		}
 	}
 
@@ -503,7 +448,8 @@ asmlinkage __visible void mmnif_handler(void)
 
 	priv = netdev_priv(mmnif_dev);
 
-	spin_lock(&priv->lock);
+	if (!spin_trylock(&priv->lock))
+		return;
 	mmnif_rx(mmnif_dev, priv);
         spin_unlock(&priv->lock);
 
@@ -536,7 +482,7 @@ static int __init mmnif_init(void)
 {
 	struct net_device *dev = NULL;
 	struct mmnif_private *priv = NULL;
-	int i, ret = 0;
+	int ret = 0;
 
 	pr_notice("mmnif: Initialize HermitCore's mmnif driver\n");
 
@@ -564,16 +510,6 @@ static int __init mmnif_init(void)
 	}
 
 	printk(KERN_INFO "%s: Initialized between HermitCore & Linux.\n", dev->name);
-
-	for (i=0; i<MMNIF_HASHTABLE_SIZE; i++)
-	{
-		mmnif_hashtable[i].socket = -1;
-		mmnif_hashtable[i].remote_socket = -1;
-		mmnif_hashtable[i].dest_ip = 0;
-		//mmnif_hashtable[i].counter = 0;
-
-		sema_init(&mmnif_hashtable[i].sem, 0);
-	}
 
 	return ret;
 

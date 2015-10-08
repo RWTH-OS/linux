@@ -112,15 +112,6 @@ void hermit_get_mmnif_data(struct mmnif_private* priv)
 	memset((void*)priv->rx_buff, 0x00, header_size);
 	memset((void*)priv->rx_heap, 0x00, heap_size);
 	priv->rx_buff->dcount = MMNIF_MAX_DESCRIPTORS;
-
-	for (i=0; i<MMNIF_MAX_ACCEPTORS; i++)
-	{
-		priv->rx_buff->acceptors[i].stat = MMNIF_ACC_STAT_CLOSED;
-		priv->rx_buff->acceptors[i].nsock = -1;
-		priv->rx_buff->acceptors[i].rsock = -1;
-		priv->rx_buff->acceptors[i].src_ip = 0;
-		priv->rx_buff->acceptors[i].port = 0;
-	}
 }
 
 static inline void set_ipi_dest(uint32_t cpu_id)
