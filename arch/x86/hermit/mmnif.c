@@ -178,6 +178,9 @@ static netdev_tx_t mmnif_xmit(struct sk_buff *skb, struct net_device *dev)
 	uint8_t dest_ip = (iph->daddr >> 24);
 	unsigned long flags;
 
+	if (!mmnif_link(dev))
+		return NETDEV_TX_OK;
+
  	//pr_notice("mmnif_xmit: data %p, len %d, dest address %pI4, dest_ip %d\n", skb->data, skb->len-ETH_HLEN, &iph->daddr, (int)dest_ip);
 
 	spin_lock_irqsave(&priv->lock, flags);
@@ -432,7 +435,7 @@ out:
 	return npackets;
 }
 
-asmlinkage __visible void mmnif_handler(void)
+__visible void smp_mmnif_interrupt(struct pt_regs *regs)
 {
 	struct mmnif_private *priv;
 
@@ -456,6 +459,35 @@ asmlinkage __visible void mmnif_handler(void)
 leave_handler:
 	irq_exit();
 }
+
+#if 0
+__visible void smp_trace_mmnif_interrupt(struct pt_regs *regs)
+{
+	struct mmnif_private *priv;
+
+	ipi_entering_ack_irq();
+	inc_irq_stat(irq_mmnif_count);
+	trace_mmnif_entry(MMNIF_VECTOR);
+
+	/* return if mmnif_dev is not yet initialized */
+	if (!mmnif_dev)
+	{
+		pr_notice("mmnif_irqhandler(): the driver is not initialized yet\n");
+		goto leave_handler;
+	}
+
+	priv = netdev_priv(mmnif_dev);
+
+	if (!spin_trylock(&priv->lock))
+		return;
+	mmnif_rx(mmnif_dev, priv);
+	spin_unlock(&priv->lock);
+
+leave_handler:
+        trace_mmnif_exit(MMNIF_VECTOR);
+	irq_exit();
+}
+#endif
 
 static void mmnif_setup(struct net_device *dev)
 {

@@ -783,7 +783,7 @@ apicinterrupt LOCAL_TIMER_VECTOR		apic_timer_interrupt		smp_apic_timer_interrupt
 apicinterrupt X86_PLATFORM_IPI_VECTOR		x86_platform_ipi		smp_x86_platform_ipi
 
 #ifdef CONFIG_HERMIT_CORE
-apicinterrupt3 MMNIF_VECTOR			mmnif_interrupt			mmnif_handler
+apicinterrupt3 MMNIF_VECTOR			mmnif_interrupt			smp_mmnif_interrupt
 #endif
 
 #ifdef CONFIG_HAVE_KVM

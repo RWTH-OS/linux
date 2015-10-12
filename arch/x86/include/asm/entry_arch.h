@@ -19,7 +19,7 @@ BUILD_INTERRUPT3(reboot_interrupt, REBOOT_VECTOR, smp_reboot_interrupt)
 #endif
 
 #ifdef CONFIG_HERMIT_CORE
-BUILD_INTERRUPT3(mmnif_interrupt, MMNIF_VECTOR, mmnif_handler)
+BUILD_INTERRUPT3(mmnif_interrupt, MMNIF_VECTOR, smp_mmnif_interrupt)
 #endif
 
 BUILD_INTERRUPT(x86_platform_ipi, X86_PLATFORM_IPI_VECTOR)

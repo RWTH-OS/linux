@@ -77,19 +77,14 @@ static unsigned int heap_size = MMNIF_RX_BUFFERLEN;
 static char* header_phy_start_address = NULL;
 static char* heap_phy_start_address = NULL;
 static void* phy_isle_locks = NULL;
+static unsigned int isle_counter = 0;
 
 /* tramploline to boot a CPU */
 extern uint8_t* hermit_trampoline;
 
 u32 mmnif_link(struct net_device *dev)
 {
-	int i;
-
-	for(i=0; i<NR_CPUS; i++)
-		if (hcpu_online[i] >= 0)
-			return 1;
-
-	return 0;
+	return (isle_counter > 0);
 }
 
 void hermit_get_mmnif_data(struct mmnif_private* priv)
@@ -379,6 +374,8 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 			}
 		}
 
+		isle_counter--;
+
 		arch_spin_unlock(&boot_lock);
 
 		return count;
@@ -409,6 +406,8 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 		if (!ret)
 			hcpu_online[cpus[i+1]] = isle;
 	}
+
+	isle_counter++;
 
 	arch_spin_unlock(&boot_lock);
 
