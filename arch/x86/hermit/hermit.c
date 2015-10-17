@@ -77,6 +77,7 @@ static unsigned int heap_size = MMNIF_RX_BUFFERLEN;
 static char* header_phy_start_address = NULL;
 static char* heap_phy_start_address = NULL;
 static void* phy_isle_locks = NULL;
+static void* phy_rcce_internals = NULL;
 static unsigned int isle_counter = 0;
 
 /* tramploline to boot a CPU */
@@ -196,6 +197,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		*((uint32_t*) (hermit_base[isle] + 0x18)) = cpu_khz / 1000;
 		*((uint32_t*) (hermit_base[isle] + 0x1C)) = cpu;
 		*((uint32_t*) (hermit_base[isle] + 0x24)) = total_cpus;
+		*((uint32_t*) (hermit_base[isle] + 0x28)) = (uint64_t) phy_rcce_internals;
 		*((uint32_t*) (hermit_base[isle] + 0x34)) = isle;
 		*((uint64_t*) (hermit_base[isle] + 0x38)) = sz;
 		*((uint64_t*) (hermit_base[isle] + 0x40)) = (uint64_t) phy_isle_locks;
@@ -566,6 +568,7 @@ int __init hermit_init(void)
 	char name[NAME_SIZE];
 	phys_addr_t mem;
 	ulong flags = choose_memblock_flags();
+	int* tmp;
 
 	if (!enable_hermit)
 		return 0;
@@ -638,6 +641,20 @@ int __init hermit_init(void)
 
 	phy_isle_locks = (void*) mem;
 	pr_notice("HermitCore's locks are mapped at 0x%p\n", phy_isle_locks);
+
+	mem = memblock_find_in_range(4 << 20, 4 << 25, PAGE_SIZE, PAGE_SIZE);
+	if (ret) {
+		ret = -ENOMEM;
+		goto _exit;
+	}
+
+	phy_rcce_internals = (void*) mem;
+	pr_notice("RCCE infos are mapped at 0x%p\n", phy_rcce_internals);
+
+	// init RCCE locks
+	tmp = (int*) phys_to_virt(mem);
+	memset(tmp, 0x00, PAGE_SIZE);
+	tmp[1] = 1;
 
 	/*
 	 * Create a kobject for HermitCore and located
