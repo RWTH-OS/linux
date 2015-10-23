@@ -66,12 +66,21 @@
 
 #include "hermit.h"
 
+#define DRV_NAME	"mmnif"
+#define DRV_VERSION	"1.0"
+
 static struct net_device *mmnif_dev = NULL;
 
-extern u32 mmnif_link(struct net_device *dev);
+static void mmnif_get_drvinfo(struct net_device *dev,
+                              struct ethtool_drvinfo *info)
+{
+	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
+	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
+}
 
-static const struct ethtool_ops mmnif_ethtool_ops = {
-	.get_link		= mmnif_link,
+static const struct ethtool_ops mmnif_ethtool_ops __read_mostly = {
+	.get_link    = ethtool_op_get_link,
+	.get_drvinfo = mmnif_get_drvinfo,
 };
 
 /* mmnif_rxbuff_alloc():
@@ -178,9 +187,6 @@ static netdev_tx_t mmnif_xmit(struct sk_buff *skb, struct net_device *dev)
 	uint8_t dest_ip = (iph->daddr >> 24);
 	unsigned long flags;
 
-	if (!mmnif_link(dev))
-		return NETDEV_TX_OK;
-
  	//pr_notice("mmnif_xmit: data %p, len %d, dest address %pI4, dest_ip %d\n", skb->data, skb->len-ETH_HLEN, &iph->daddr, (int)dest_ip);
 
 	spin_lock_irqsave(&priv->lock, flags);
@@ -237,6 +243,32 @@ struct net_device_stats *mmnif_stats(struct net_device *dev)
 	return &priv->stats;
 }
 
+static int mmnif_change_carrier(struct net_device *dev, bool new_carrier)
+{
+	//pr_notice("mmnif_change_carrier: new_carrier %d\n", (int) new_carrier);
+
+	if (new_carrier)
+		netif_carrier_on(dev);
+	else
+		netif_carrier_off(dev);
+
+	return 0;
+}
+
+int mmnif_set_carrier(bool new_carrier)
+{
+	return mmnif_change_carrier(mmnif_dev, new_carrier);
+}
+
+extern unsigned int isle_counter;
+
+static int mmnif_get_iflink(const struct net_device *dev)
+{
+        //pr_notice("mmnif_get_iflink: %d\n", (isle_counter > 0));
+
+	return (isle_counter > 0);
+}
+
 /*
  * This function is called to fill up an eth header, since arp is not
  * available on the interface
@@ -262,11 +294,13 @@ static const struct header_ops mmnif_header_ops = {
 	.create  = mmnif_header
 };
 
-static const struct net_device_ops mmnif_ops = {
+static const struct net_device_ops mmnif_ops __read_mostly = {
 	.ndo_start_xmit = mmnif_xmit,
 	.ndo_get_stats = mmnif_stats,
-	//.ndo_set_mac_address = eth_mac_addr,
-	//.ndo_validate_addr = eth_validate_addr,
+	.ndo_set_mac_address = eth_mac_addr,
+	.ndo_validate_addr = eth_validate_addr,
+	.ndo_change_carrier = mmnif_change_carrier,
+	.ndo_get_iflink = mmnif_get_iflink,
 };
 
 /* mmnif_rxbuff_free() : the opposite to mmnif_rxbuff_alloc() a from the receiver
@@ -508,6 +542,7 @@ static void mmnif_setup(struct net_device *dev)
 	dev->netdev_ops		= &mmnif_ops;
 
 	eth_random_addr(dev->dev_addr);
+	netif_carrier_off(dev);
 }
 
 static int __init mmnif_init(void)
