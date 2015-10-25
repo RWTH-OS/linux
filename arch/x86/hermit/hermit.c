@@ -388,10 +388,16 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 	for(i=0; i<possible_cpus; i++) {
 		if ((cpus[i+1] < 0) || (cpus[i+1] >= NR_CPUS))
 			return -EINVAL;
-		if (hcpu_online[cpus[i+1]] == isle)
+		if (hcpu_online[cpus[i+1]] >= 0)
 			return -EBUSY;
 		if (cpu_online(cpus[i+1]))
 			return -EINVAL;
+	}
+
+	/* Do HermitCore already use the isle? */
+	for(i=0; i<NR_CPUS; i++)  {
+		if (hcpu_online[i] == isle)
+			return -EBUSY;
 	}
 
 	//TODO: to avoid problems with Linux, we disable the hotplug feature
