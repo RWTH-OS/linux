@@ -444,7 +444,7 @@ static ssize_t hermit_get_log(struct kobject *kobj, struct kobj_attribute *attr,
 	kfree(path);
 
 	if ((isle >= 0) && (isle < NR_CPUS) && hermit_base[isle])
-		return snprintf(buf, 2*PAGE_SIZE, "%s\n", hermit_base[isle]+5*PAGE_SIZE);
+		return snprintf(buf, PAGE_SIZE, "%s\n", hermit_base[isle]+5*PAGE_SIZE);
 
 	return -ENOMEM;
 }
