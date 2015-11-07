@@ -514,19 +514,19 @@ static ssize_t hermit_get_base(struct kobject *kobj, struct kobj_attribute *attr
  */
 
 static struct kobj_attribute cpu_attribute =
-	__ATTR(cpus, 0600, hermit_is_cpus, hermit_set_cpus);
+	__ATTR(cpus, 0644, hermit_is_cpus, hermit_set_cpus);
 
 static struct kobj_attribute log_attribute =
-	__ATTR(log, 0600, hermit_get_log, NULL);
+	__ATTR(log, 0644, hermit_get_log, NULL);
 
 static struct kobj_attribute path_attribute =
-	__ATTR(path, 0600, hermit_get_path, hermit_set_path);
+	__ATTR(path, 0644, hermit_get_path, hermit_set_path);
 
 static struct kobj_attribute memsize_attribute =
-	__ATTR(memsize, 0600, hermit_get_memsize, NULL);
+	__ATTR(memsize, 0644, hermit_get_memsize, NULL);
 
 static struct kobj_attribute base_attribute =
-	__ATTR(base, 0600, hermit_get_base, NULL);
+	__ATTR(base, 0644, hermit_get_base, NULL);
 
 static struct attribute * isle_attrs[] = {
 	&cpu_attribute.attr,
