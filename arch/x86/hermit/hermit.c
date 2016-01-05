@@ -46,6 +46,7 @@
 #include <linux/fs.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
+#include <linux/mc146818rtc.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/delay.h>
@@ -53,10 +54,9 @@
 #include <asm/apic.h>
 #include <asm/tsc.h>
 #include <asm/msr.h>
+#include <asm/tlbflush.h>
 
 #define NAME_SIZE	256
-#define CMOS_PORT	0x70
-#define CMOS_PORT_DATA	0x71
 
 /* include code to switch from real mode to 64bit mode */
 #include "boot.h"
@@ -124,6 +124,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 {
 	int i;
 	unsigned int start_eip;
+	unsigned long flags;
 
 	pr_notice("Isle %d tries to boot HermitCore on CPU %d (boot code size 0x%zx)\n", isle, cpu, sizeof(boot_code));
 
@@ -209,11 +210,17 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 
 	*((uint32_t*) (hermit_base[isle] + 0x30)) = cpu;
 
+	smp_mb();
 	local_irq_disable();
 
 	/* set shutdown code to 0x0A */
-	outb(CMOS_PORT, 0xF);  // offset 0xF is shutdown code
-	outb(CMOS_PORT_DATA, 0x0A);
+	spin_lock_irqsave(&rtc_lock, flags);
+	CMOS_WRITE(0xa, 0xf);
+	spin_unlock_irqrestore(&rtc_lock, flags);
+	local_flush_tlb();
+
+	*((volatile unsigned short *)phys_to_virt(TRAMPOLINE_PHYS_HIGH)) = start_eip >> 4;
+	*((volatile unsigned short *)phys_to_virt(TRAMPOLINE_PHYS_LOW)) = start_eip & 0xf;
 
 	/*
 	 * use the universal startup algorithm of Intel's MultiProcessor Specification
@@ -261,6 +268,13 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 
 	cpu_counter++;
 	while(*((volatile uint32_t*) (hermit_base[isle] + 0x20)) < cpu_counter) { cpu_relax(); }
+
+	local_flush_tlb();
+	spin_lock_irqsave(&rtc_lock, flags);
+	CMOS_WRITE(0, 0xf);
+	spin_unlock_irqrestore(&rtc_lock, flags);
+
+	*((volatile u32 *)phys_to_virt(TRAMPOLINE_PHYS_LOW)) = 0;
 
 	return ((apic_read(APIC_ICR) & APIC_ICR_BUSY) ? -EIO : 0); // did it fail (still delivering) or succeed ?
 }
@@ -367,17 +381,29 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 
 		// Ok, we have to shutdown the isle
 		for(i=0; i<NR_CPUS; i++)  {
-			if (hcpu_online[i] == isle) {
-				if (!shutdown_hermit_core(i))
-					hcpu_online[i] = -1;
-			}
+			if (hcpu_online[i] == isle)
+				shutdown_hermit_core(i);
+		}
+
+		while (*((volatile uint32_t*) (hermit_base[isle] + 0x20)) > 0) {
+			cpu_relax();
+		}
+
+		// check if the system is down
+		for(i=0; i<NR_CPUS; i++)  {
+			if (hcpu_online[i] == isle)
+				hcpu_online[i] = -1;
 		}
 
 		isle_counter--;
-		if (isle_counter == 0)
+		if (isle_counter == 0) {
 			mmnif_set_carrier(false);
+			//cpu_hotplug_enable();
+		}
 
 		arch_spin_unlock(&boot_lock);
+
+		pr_notice("HermitCore %d is down!\n", isle);
 
 		return count;
 	}
