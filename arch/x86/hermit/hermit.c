@@ -427,7 +427,8 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 	}
 
 	//TODO: to avoid problems with Linux, we disable the hotplug feature
-	cpu_hotplug_disable();
+	if (!isle_counter)
+		cpu_hotplug_disable();
 
 	tick0 = get_cycles();
 
