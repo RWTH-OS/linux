@@ -656,6 +656,26 @@ int __init hermit_init(void)
 	phy_isle_locks = (void*) mem;
 	pr_notice("HermitCore's locks are mapped at 0x%p\n", phy_isle_locks);
 
+	mem = memblock_find_in_range(4 << 20, 4 << 25, PAGE_SIZE, PAGE_SIZE);
+	if (ret) {
+		ret = -ENOMEM;
+		goto _exit;
+	}
+
+	ret = memblock_reserve(mem, PAGE_SIZE);
+	if (ret) {
+		ret = -ENOMEM;
+		goto _exit;
+	}
+
+	phy_rcce_internals = (void*) mem;
+	pr_notice("RCCE infos are mapped at 0x%p\n", phy_rcce_internals);
+
+        // init RCCE locks
+	tmp = (int*) phys_to_virt(mem);
+	memset(tmp, 0x00, PAGE_SIZE);
+	tmp[1] = 1;
+
 	/* allocate for each HermitCore instance */
 	for(i=0; i<num_possible_nodes(); i++) {
 		mem = memblock_find_in_range_node(pool_size / num_possible_nodes(), 2 << 20, 4 << 20, MEMBLOCK_ALLOC_ACCESSIBLE, i, flags);
@@ -674,22 +694,6 @@ int __init hermit_init(void)
 		hermit_base[i] = (char*) phys_to_virt(mem);
 		pr_notice("HermitCore %d at 0x%p (0x%zx)\n", i, hermit_base[i], (size_t) mem);
 	}
-
-	mem = memblock_find_in_range(4 << 20, 4 << 25, PAGE_SIZE, PAGE_SIZE);
-	if (ret) {
-		ret = -ENOMEM;
-		goto _exit;
-	}
-
-#if 0
-	phy_rcce_internals = (void*) mem;
-	pr_notice("RCCE infos are mapped at 0x%p\n", phy_rcce_internals);
-
-	// init RCCE locks
-	tmp = (int*) phys_to_virt(mem);
-	memset(tmp, 0x00, PAGE_SIZE);
-	tmp[1] = 1;
-#endif
 
 	/*
 	 * Create a kobject for HermitCore and located
