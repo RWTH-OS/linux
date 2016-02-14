@@ -30,6 +30,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#define DEBUG
+
 #include <linux/kobject.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -117,16 +119,54 @@ static inline void set_ipi_dest(uint32_t cpu_id)
 	apic_write(APIC_ICR2, tmp);
 }
 
+static inline void smpboot_setup_warm_reset_vector(unsigned long start_eip)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&rtc_lock, flags);
+	CMOS_WRITE(0xa, 0xf);
+	spin_unlock_irqrestore(&rtc_lock, flags);
+	local_flush_tlb();
+	*((volatile unsigned short *)phys_to_virt(TRAMPOLINE_PHYS_HIGH)) =
+							start_eip >> 4;
+	*((volatile unsigned short *)phys_to_virt(TRAMPOLINE_PHYS_LOW)) =
+							start_eip & 0xf;
+}
+
+static inline void smpboot_restore_warm_reset_vector(void)
+{
+	unsigned long flags;
+
+	/*
+	 * Install writable page 0 entry to set BIOS data area.
+	 */
+	local_flush_tlb();
+
+	/*
+	 * Paranoid:  Set warm reset code and vector here back
+	 * to default values.
+	 */
+	spin_lock_irqsave(&rtc_lock, flags);
+	CMOS_WRITE(0, 0xf);
+	spin_unlock_irqrestore(&rtc_lock, flags);
+
+	*((volatile u32 *)phys_to_virt(TRAMPOLINE_PHYS_LOW)) = 0;
+}
+
 /*
  * Wake up a core and boot HermitCore on it
  */
 static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 {
-	int i;
+	int i, ret;
 	unsigned int start_eip;
-	unsigned long flags;
 
-	pr_notice("Isle %d tries to boot HermitCore on CPU %d (boot code size 0x%zx)\n", isle, cpu, sizeof(boot_code));
+	if (cpu_online(cpu)) {
+		pr_debug("Shutdown cpu %d\n", cpu);
+		cpu_down(cpu);
+	}
+
+	pr_debug("Isle %d tries to boot HermitCore on CPU %d (boot code size 0x%zx)\n", isle, cpu, sizeof(boot_code));
 
 	if (!hermit_trampoline)
 		return -EINVAL;
@@ -136,7 +176,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		return -ENOMEM;
 
 	if (apic_read(APIC_ICR) & APIC_ICR_BUSY) {
-		pr_notice("ERROR: previous send not complete");
+		pr_debug("ERROR: previous send not complete");
 		return -EIO;
 	}
 
@@ -170,7 +210,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		sz = i_size_read(file_inode(file));
 		if (sz <= 0)
 			return -EIO;
-		pr_notice("Loading HermitCore's kernel image with a size of %d KiB\n", (int) sz >> 10);
+		pr_debug("Loading HermitCore's kernel image with a size of %d KiB\n", (int) sz >> 10);
 
 		pos = 0;
 		while (pos < sz) {
@@ -206,6 +246,8 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		*((uint32_t*) (hermit_base[isle] + 0x60)) = num_possible_nodes();
 		*((uint64_t*) (hermit_base[isle] + 0x64)) = (uint64_t) heap_phy_start_address;
 		*((uint64_t*) (hermit_base[isle] + 0x6c)) = (uint64_t) header_phy_start_address;
+		if (x2apic_enabled())
+			*((uint32_t*) (hermit_base[isle] + 0x74)) = 0;
 	}
 
 	*((uint32_t*) (hermit_base[isle] + 0x30)) = cpu;
@@ -213,14 +255,8 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 	smp_mb();
 	local_irq_disable();
 
-	/* set shutdown code to 0x0A */
-	spin_lock_irqsave(&rtc_lock, flags);
-	CMOS_WRITE(0xa, 0xf);
-	spin_unlock_irqrestore(&rtc_lock, flags);
-	local_flush_tlb();
-
-	*((volatile unsigned short *)phys_to_virt(TRAMPOLINE_PHYS_HIGH)) = start_eip >> 4;
-	*((volatile unsigned short *)phys_to_virt(TRAMPOLINE_PHYS_LOW)) = start_eip & 0xf;
+	smpboot_setup_warm_reset_vector(start_eip);
+	smp_mb();
 
 	/*
 	 * use the universal startup algorithm of Intel's MultiProcessor Specification
@@ -228,7 +264,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 	if (x2apic_enabled()) {
 		uint64_t dest = ((uint64_t)cpu << 32);
 
-		//pr_notice("X2APIC is enabled\n");
+		//pr_debug("X2APIC is enabled\n");
 
 		wrmsrl(0x800 + (APIC_ICR >> 4), dest|APIC_INT_LEVELTRIG|APIC_INT_ASSERT|APIC_DM_INIT);
 		udelay(200);
@@ -241,8 +277,10 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		/* do it again */
 		wrmsrl(0x800 + (APIC_ICR >> 4), dest|APIC_DM_STARTUP|(start_eip >> 12));
 		udelay(200);
+
+		ret = 0;
 	} else {
-		//pr_notice("X2APIC is disabled\n");
+		//pr_debug("X2APIC is disabled\n");
 
 		set_ipi_dest(cpu);
 		apic_write(APIC_ICR, APIC_INT_LEVELTRIG|APIC_INT_ASSERT|APIC_DM_INIT);
@@ -258,25 +296,22 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		set_ipi_dest(cpu);
 		apic_write(APIC_ICR, APIC_DM_STARTUP|(start_eip >> 12));
 		udelay(200);
-	}
 
-	i = 0;
-	while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (i < 1000))
-		i++; /* wait for it to finish, give up eventualy tho */
+		i = 0;
+		while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (i < 1000))
+			i++; /* wait for it to finish, give up eventualy tho */
+
+		ret = ((apic_read(APIC_ICR) & APIC_ICR_BUSY) ? -EIO : 0); // did it fail (still delivering) or succeed ?
+	}
 
 	local_irq_enable();
 
 	cpu_counter++;
 	while(*((volatile uint32_t*) (hermit_base[isle] + 0x20)) < cpu_counter) { cpu_relax(); }
 
-	local_flush_tlb();
-	spin_lock_irqsave(&rtc_lock, flags);
-	CMOS_WRITE(0, 0xf);
-	spin_unlock_irqrestore(&rtc_lock, flags);
+	smpboot_restore_warm_reset_vector();
 
-	*((volatile u32 *)phys_to_virt(TRAMPOLINE_PHYS_LOW)) = 0;
-
-	return ((apic_read(APIC_ICR) & APIC_ICR_BUSY) ? -EIO : 0); // did it fail (still delivering) or succeed ?
+	return ret;
 }
 
 /*
@@ -375,7 +410,7 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 		return -EINVAL;
 
 	if (cpus[1] < 0) {
-		pr_notice("Try to shutdown HermitCore on isle %d\n", isle);
+		pr_debug("Try to shutdown HermitCore on isle %d\n", isle);
 
 		arch_spin_lock(&boot_lock);
 
@@ -389,26 +424,34 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 			cpu_relax();
 		}
 
+		// be sure that the processors are in halted state
+		udelay(1000);
+
 		// check if the system is down
 		for(i=0; i<NR_CPUS; i++)  {
-			if (hcpu_online[i] == isle)
+			if (hcpu_online[i] == isle) {
+				int ret;
+
 				hcpu_online[i] = -1;
+				ret = cpu_up(i);
+
+				if (ret)
+					pr_notice("HermitCore isn't able to restart Linux! cpu_up(%d) returns %d\n", i, ret);
+			}
 		}
 
 		isle_counter--;
-		if (isle_counter == 0) {
+		if (isle_counter == 0)
 			mmnif_set_carrier(false);
-			//cpu_hotplug_enable();
-		}
 
 		arch_spin_unlock(&boot_lock);
 
-		pr_notice("HermitCore %d is down!\n", isle);
+		pr_debug("HermitCore %d is down!\n", isle);
 
 		return count;
 	}
 
-	pr_notice("Try to boot HermitCore on isle %d (%d cpus)\n", isle, cpus[0]);
+	pr_debug("Try to boot HermitCore on isle %d (%d cpus)\n", isle, cpus[0]);
 
 	/* Do Linux or HermitCore already use the CPUs? */
 	for(i=0; i<possible_cpus; i++) {
@@ -416,8 +459,6 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 			return -EINVAL;
 		if (hcpu_online[cpus[i+1]] >= 0)
 			return -EBUSY;
-		if (cpu_online(cpus[i+1]))
-			return -EINVAL;
 	}
 
 	/* Do HermitCore already use the isle? */
@@ -425,10 +466,6 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 		if (hcpu_online[i] == isle)
 			return -EBUSY;
 	}
-
-	//TODO: to avoid problems with Linux, we disable the hotplug feature
-	if (!isle_counter)
-		cpu_hotplug_disable();
 
 	tick0 = get_cycles();
 
@@ -449,7 +486,7 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 
 	tick1 = get_cycles();
 
-	pr_notice("HermitCore requires %lld ms (%lld ticks) to boot the system\n", (tick1-tick0) / cpu_khz, tick1-tick0);
+	pr_debug("HermitCore requires %lld ms (%lld ticks) to boot the system\n", (tick1-tick0) / cpu_khz, tick1-tick0);
 
 	return count;
 }
