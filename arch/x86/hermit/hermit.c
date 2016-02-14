@@ -160,13 +160,14 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 {
 	int i, ret;
 	unsigned int start_eip;
+	int apicid = apic->cpu_present_to_apicid(cpu);
 
 	if (cpu_online(cpu)) {
 		pr_debug("Shutdown cpu %d\n", cpu);
 		cpu_down(cpu);
 	}
 
-	pr_debug("Isle %d tries to boot HermitCore on CPU %d (boot code size 0x%zx)\n", isle, cpu, sizeof(boot_code));
+	pr_debug("Isle %d tries to boot HermitCore on CPU %d (apicid %d, boot code size 0x%zx)\n", isle, cpu, apicid, sizeof(boot_code));
 
 	if (!hermit_trampoline)
 		return -EINVAL;
@@ -233,7 +234,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		*((uint64_t*) (hermit_base[isle] + 0x08)) = (uint64_t) virt_to_phys(hermit_base[isle]);
 		*((uint64_t*) (hermit_base[isle] + 0x10)) = (uint64_t) virt_to_phys(hermit_base[isle]) + pool_size / num_possible_nodes();
 		*((uint32_t*) (hermit_base[isle] + 0x18)) = cpu_khz / 1000;
-		*((uint32_t*) (hermit_base[isle] + 0x1C)) = cpu;
+		*((uint32_t*) (hermit_base[isle] + 0x1C)) = apicid;
 		*((uint32_t*) (hermit_base[isle] + 0x24)) = total_cpus;
 		*((uint32_t*) (hermit_base[isle] + 0x28)) = (uint64_t) phy_rcce_internals;
 		*((uint32_t*) (hermit_base[isle] + 0x34)) = isle;
@@ -250,7 +251,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 			*((uint32_t*) (hermit_base[isle] + 0x74)) = 0;
 	}
 
-	*((uint32_t*) (hermit_base[isle] + 0x30)) = cpu;
+	*((uint32_t*) (hermit_base[isle] + 0x30)) = apicid;
 
 	smp_mb();
 	local_irq_disable();
@@ -262,7 +263,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 	 * use the universal startup algorithm of Intel's MultiProcessor Specification
 	 */
 	if (x2apic_enabled()) {
-		uint64_t dest = ((uint64_t)cpu << 32);
+		uint64_t dest = ((uint64_t)apicid << 32);
 
 		//pr_debug("X2APIC is enabled\n");
 
@@ -282,18 +283,18 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 	} else {
 		//pr_debug("X2APIC is disabled\n");
 
-		set_ipi_dest(cpu);
+		set_ipi_dest(apicid);
 		apic_write(APIC_ICR, APIC_INT_LEVELTRIG|APIC_INT_ASSERT|APIC_DM_INIT);
 		udelay(200);
 		/* reset INIT */
 		apic_write(APIC_ICR, APIC_INT_LEVELTRIG|APIC_DM_INIT);
 		udelay(10000);
 		/* send out the startup */
-		set_ipi_dest(cpu);
+		set_ipi_dest(apicid);
 		apic_write(APIC_ICR, APIC_DM_STARTUP|(start_eip >> 12));
 		udelay(200);
 		/* do it again */
-		set_ipi_dest(cpu);
+		set_ipi_dest(apicid);
 		apic_write(APIC_ICR, APIC_DM_STARTUP|(start_eip >> 12));
 		udelay(200);
 
@@ -348,12 +349,13 @@ static ssize_t hermit_is_cpus(struct kobject *kobj, struct kobj_attribute *attr,
 
 static int shutdown_hermit_core(unsigned cpu)
 {
+	int apicid = apic->cpu_present_to_apicid(cpu);
 	int ret = -EIO;
 
 	local_irq_disable();
 
 	if (x2apic_enabled()) {
-		uint64_t dest = ((uint64_t)cpu << 32);
+		uint64_t dest = ((uint64_t)apicid << 32);
 
 		wrmsrl(0x830, dest|APIC_INT_ASSERT|APIC_DM_FIXED|(81+32));
 	} else {
@@ -364,7 +366,7 @@ static int shutdown_hermit_core(unsigned cpu)
 			goto Lerr;
 		}
 
-		set_ipi_dest(cpu);
+		set_ipi_dest(apicid);
 		apic_write(APIC_ICR, APIC_INT_ASSERT|APIC_DM_FIXED|(81+32));
 
 		j = 0;
@@ -780,12 +782,14 @@ _exit:
 	return ret;
 }
 
-static int apic_send_ipi(uint64_t dest, uint8_t irq)
+static int apic_send_ipi(int dest, uint8_t irq)
 {
+	uint64_t apicid = apic->cpu_present_to_apicid(dest);
+
 	local_irq_disable();
 
         if (x2apic_enabled()) {
-                wrmsrl(0x830, (dest << 32)|APIC_INT_ASSERT|APIC_DM_FIXED|irq);
+                wrmsrl(0x830, (apicid << 32)|APIC_INT_ASSERT|APIC_DM_FIXED|irq);
         } else {
 		uint32_t j;
 
@@ -794,7 +798,7 @@ static int apic_send_ipi(uint64_t dest, uint8_t irq)
                         return -EIO;
                 }
 
-                set_ipi_dest((uint32_t)dest);
+                set_ipi_dest((uint32_t)apicid);
                 apic_write(APIC_ICR, APIC_INT_ASSERT|APIC_DM_FIXED|irq);
 
                 j = 0;
