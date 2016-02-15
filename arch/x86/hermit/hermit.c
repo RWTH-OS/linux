@@ -721,12 +721,14 @@ int __init hermit_init(void)
 		mem = memblock_find_in_range_node(pool_size / num_possible_nodes(), 2 << 20, 4 << 20, MEMBLOCK_ALLOC_ACCESSIBLE, i, flags);
 		//mem = memblock_find_in_range(4 << 20, 100<<20, CONFIG_HERMIT_SIZE, 2 << 20);
 		if (!mem) {
+			pr_notice("HermitCore is not able to find a block of 0x%zx KiB\n", (pool_size / num_possible_nodes()) / 1024);
 			ret = -ENOMEM;
 			goto _exit;
 		}
 
 		ret = memblock_reserve(mem, pool_size / num_possible_nodes());
 		if (ret) {
+			pr_notice("HermitCore isn't able to reserve block\n");
 			ret = -ENOMEM;
 			goto _exit;
 		}
