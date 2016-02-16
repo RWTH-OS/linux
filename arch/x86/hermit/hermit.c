@@ -642,6 +642,7 @@ int __init hermit_init(void)
 	phys_addr_t mem;
 	ulong flags = choose_memblock_flags();
 	int* tmp;
+	unsigned long long msr;
 
 	if (!enable_hermit)
 		return 0;
@@ -650,6 +651,9 @@ int __init hermit_init(void)
 	pr_notice("HermitCore trampoline at 0x%p (0x%zx)\n", hermit_trampoline, (size_t) virt_to_phys(hermit_trampoline));
 	pr_notice("Number of available nodes: %d\n", num_possible_nodes());
 	pr_notice("Pool size: 0x%zx KiB\n", pool_size / 1024);
+
+	rdmsrl(MSR_IA32_MISC_ENABLE, msr);
+	pr_notice("MSR_IA32_MISC_ENABLE: 0x%llx\n", msr);
 
 	mem = memblock_find_in_range(1 << 15, 1 << 23, heap_size * (num_possible_nodes() + 1), PAGE_SIZE);
 	if (!mem) {
