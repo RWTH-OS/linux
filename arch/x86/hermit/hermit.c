@@ -347,42 +347,49 @@ static ssize_t hermit_is_cpus(struct kobject *kobj, struct kobj_attribute *attr,
 	return ret;
 }
 
-static int shutdown_hermit_core(unsigned cpu)
+static int apic_send_ipi(int dest, uint8_t irq)
 {
-	int apicid = apic->cpu_present_to_apicid(cpu);
+	int apicid = apic->cpu_present_to_apicid(dest);
 	int ret = -EIO;
 
 	local_irq_disable();
 
-	if (x2apic_enabled()) {
+        if (x2apic_enabled()) {
 		uint64_t dest = ((uint64_t)apicid << 32);
 
-		wrmsrl(0x830, dest|APIC_INT_ASSERT|APIC_DM_FIXED|(81+32));
-	} else {
-		int j;
+                wrmsrl(0x830, dest|APIC_INT_ASSERT|APIC_DM_FIXED|irq);
 
-		if (apic_read(APIC_ICR) & APIC_ICR_BUSY) {
-			pr_notice("ERROR: previous send not complete");
+		ret = 0;
+        } else {
+		uint32_t j;
+
+                if (apic_read(APIC_ICR) & APIC_ICR_BUSY) {
+                        printk("ERROR: previous send not complete");
 			goto Lerr;
-		}
+                }
 
-		set_ipi_dest(apicid);
-		apic_write(APIC_ICR, APIC_INT_ASSERT|APIC_DM_FIXED|(81+32));
+                set_ipi_dest(apicid);
+                apic_write(APIC_ICR, APIC_INT_ASSERT|APIC_DM_FIXED|irq);
 
-		j = 0;
-		while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (j < 1000))
-			j++; // wait for it to finish, give up eventualy tho
+                j = 0;
+                while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (j < 1000))
+                        j++; // wait for it to finish, give up eventualy tho
 
 		if (j >= 1000) {
 			pr_notice("ERROR: send not complete");
 			ret = -EBUSY;
 		} else ret = 0;
-	}
+        }
 
 Lerr:
 	local_irq_enable();
 
-	return ret;
+        return 0;
+}
+
+static int shutdown_hermit_core(unsigned cpu)
+{
+	return apic_send_ipi(cpu, 81+32);
 }
 
 /*
@@ -786,35 +793,6 @@ _exit:
 	}
 
 	return ret;
-}
-
-static int apic_send_ipi(int dest, uint8_t irq)
-{
-	uint64_t apicid = apic->cpu_present_to_apicid(dest);
-
-	local_irq_disable();
-
-        if (x2apic_enabled()) {
-                wrmsrl(0x830, (apicid << 32)|APIC_INT_ASSERT|APIC_DM_FIXED|irq);
-        } else {
-		uint32_t j;
-
-                if (apic_read(APIC_ICR) & APIC_ICR_BUSY) {
-                        printk("ERROR: previous send not complete");
-                        return -EIO;
-                }
-
-                set_ipi_dest((uint32_t)apicid);
-                apic_write(APIC_ICR, APIC_INT_ASSERT|APIC_DM_FIXED|irq);
-
-                j = 0;
-                while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (j < 1000))
-                        j++; // wait for it to finish, give up eventualy tho
-        }
-
-	local_irq_enable();
-
-        return 0;
 }
 
 /* trigger an interrupt on the remote processor
