@@ -350,7 +350,7 @@ static ssize_t hermit_is_cpus(struct kobject *kobj, struct kobj_attribute *attr,
 static int apic_send_ipi(int dest, uint8_t irq)
 {
 	int apicid = apic->cpu_present_to_apicid(dest);
-	int ret = -EIO;
+	int ret = -EBUSY;
 
 	local_irq_disable();
 
@@ -375,10 +375,9 @@ static int apic_send_ipi(int dest, uint8_t irq)
                 while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (j < 1000))
                         j++; // wait for it to finish, give up eventualy tho
 
-		if (j >= 1000) {
+		if (j >= 1000)
 			pr_notice("ERROR: send not complete");
-			ret = -EBUSY;
-		} else ret = 0;
+		else ret = 0;
         }
 
 Lerr:
