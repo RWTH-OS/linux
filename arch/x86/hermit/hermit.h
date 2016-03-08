@@ -46,7 +46,7 @@
 #define MMNIF_STATUS_INPROC		0x03
 #define MMNIF_STATUS_PROC		0x04
 
-#define MMNIF_RX_BUFFERLEN      	(8*1024)
+#define MMNIF_RX_BUFFERLEN      	(28*1024)
 #define MMNIF_IRQ                       122
 
 typedef struct islelock {

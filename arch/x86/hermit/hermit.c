@@ -212,6 +212,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		if (sz <= 0)
 			return -EIO;
 		pr_debug("Loading HermitCore's kernel image with a size of %d KiB\n", (int) sz >> 10);
+		pr_debug("CPU: %d MHz, TSC: %d MHz\n", cpu_khz / 1000, tsc_khz / 1000);
 
 		pos = 0;
 		while (pos < sz) {
