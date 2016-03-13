@@ -177,7 +177,7 @@ static inline void hermit_udelay(uint32_t usecs)
  */
 static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 {
-	int i, ret;
+	int i;
 	unsigned int start_eip;
 	int apicid = apic->cpu_present_to_apicid(cpu);
 
@@ -324,7 +324,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 	local_irq_enable();
 
 	cpu_counter++;
-	while(*((volatile uint32_t*) (hermit_base[isle] + 0x20)) < cpu_counter) { cpu_relax(); }
+	while(*((volatile uint32_t*) (hermit_base[isle] + 0x20)) < cpu_counter) { rep_nop(); }
 
 	smpboot_restore_warm_reset_vector();
 
@@ -399,7 +399,7 @@ static int apic_send_ipi(int dest, uint8_t irq)
 Lerr:
 	local_irq_enable();
 
-        return 0;
+        return ret;
 }
 
 static int shutdown_hermit_core(unsigned cpu)
@@ -445,7 +445,7 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 		}
 
 		while (*((volatile uint32_t*) (hermit_base[isle] + 0x20)) > 0) {
-			cpu_relax();
+			rep_nop();
 		}
 
 		// be sure that the processors are in halted state
