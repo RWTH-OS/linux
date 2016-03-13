@@ -154,6 +154,25 @@ static inline void smpboot_restore_warm_reset_vector(void)
 }
 
 /*
+ * Use our own udelay function to avoid a rescheduling with
+ * a section, where the interrupts are disabled.
+ */
+static inline void hermit_udelay(uint32_t usecs)
+{
+	uint64_t diff, end, start;
+	uint64_t deadline = (tsc_khz / 1000)  * usecs;
+
+	rdtscll(start);
+	do {
+		mb();
+		rdtscll(end);
+		diff = end > start ? end - start : start - end;
+		if (diff < deadline)
+			rep_nop();
+	} while(diff < deadline);
+}
+
+/*
  * Wake up a core and boot HermitCore on it
  */
 static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
@@ -234,7 +253,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		 */
 		*((uint64_t*) (hermit_base[isle] + 0x08)) = (uint64_t) virt_to_phys(hermit_base[isle]);
 		*((uint64_t*) (hermit_base[isle] + 0x10)) = (uint64_t) virt_to_phys(hermit_base[isle]) + pool_size / num_possible_nodes();
-		*((uint32_t*) (hermit_base[isle] + 0x18)) = cpu_khz / 1000;
+		*((uint32_t*) (hermit_base[isle] + 0x18)) = tsc_khz / 1000;
 		*((uint32_t*) (hermit_base[isle] + 0x1C)) = apicid;
 		*((uint32_t*) (hermit_base[isle] + 0x24)) = total_cpus;
 		*((uint32_t*) (hermit_base[isle] + 0x28)) = (uint64_t) phy_rcce_internals;
@@ -269,16 +288,16 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		//pr_debug("X2APIC is enabled\n");
 
 		wrmsrl(0x800 + (APIC_ICR >> 4), dest|APIC_INT_LEVELTRIG|APIC_INT_ASSERT|APIC_DM_INIT);
-		udelay(200);
+		hermit_udelay(200);
 		/* reset INIT */
 		wrmsrl(0x800 + (APIC_ICR >> 4), APIC_INT_LEVELTRIG|APIC_DM_INIT);
-		udelay(10000);
+		hermit_udelay(10000);
 		/* send out the startup */
 		wrmsrl(0x800 + (APIC_ICR >> 4), dest|APIC_DM_STARTUP|(start_eip >> 12));
-		udelay(200);
+		hermit_udelay(200);
 		/* do it again */
 		wrmsrl(0x800 + (APIC_ICR >> 4), dest|APIC_DM_STARTUP|(start_eip >> 12));
-		udelay(200);
+		hermit_udelay(200);
 
 		ret = 0;
 	} else {
@@ -286,18 +305,18 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 
 		set_ipi_dest(apicid);
 		apic_write(APIC_ICR, APIC_INT_LEVELTRIG|APIC_INT_ASSERT|APIC_DM_INIT);
-		udelay(200);
+		hermit_udelay(200);
 		/* reset INIT */
 		apic_write(APIC_ICR, APIC_INT_LEVELTRIG|APIC_DM_INIT);
-		udelay(10000);
+		hermit_udelay(10000);
 		/* send out the startup */
 		set_ipi_dest(apicid);
 		apic_write(APIC_ICR, APIC_DM_STARTUP|(start_eip >> 12));
-		udelay(200);
+		hermit_udelay(200);
 		/* do it again */
 		set_ipi_dest(apicid);
 		apic_write(APIC_ICR, APIC_DM_STARTUP|(start_eip >> 12));
-		udelay(200);
+		hermit_udelay(200);
 
 		i = 0;
 		while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (i < 1000))
