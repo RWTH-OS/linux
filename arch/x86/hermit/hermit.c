@@ -154,7 +154,7 @@ static inline void smpboot_restore_warm_reset_vector(void)
 }
 
 /*
- * Use our own udelay function to avoid a rescheduling with
+ * Create an own udelay function to avoid a rescheduling within
  * a section, where the interrupts are disabled.
  */
 static inline void hermit_udelay(uint32_t usecs)
