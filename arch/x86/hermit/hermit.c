@@ -298,8 +298,6 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		/* do it again */
 		wrmsrl(0x800 + (APIC_ICR >> 4), dest|APIC_DM_STARTUP|(start_eip >> 12));
 		hermit_udelay(200);
-
-		ret = 0;
 	} else {
 		//pr_debug("X2APIC is disabled\n");
 
@@ -321,8 +319,6 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		i = 0;
 		while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (i < 1000))
 			i++; /* wait for it to finish, give up eventualy tho */
-
-		ret = ((apic_read(APIC_ICR) & APIC_ICR_BUSY) ? -EIO : 0); // did it fail (still delivering) or succeed ?
 	}
 
 	local_irq_enable();
@@ -332,7 +328,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 
 	smpboot_restore_warm_reset_vector();
 
-	return ret;
+	return 0;
 }
 
 /*
