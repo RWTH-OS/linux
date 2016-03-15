@@ -62,6 +62,7 @@
 #include <linux/ethtool.h>
 #include <linux/ip.h>
 #include <linux/semaphore.h>
+#include <linux/kthread.h>
 #include <asm/atomic.h>
 
 #include "hermit.h"
@@ -453,12 +454,13 @@ anotherpacket:
 	}
 #endif
 
-	netif_rx_ni(skb);
+	if (likely(netif_rx(skb) == NET_RX_SUCCESS)) {
+	        /* Maintain stats */
+		npackets++;
+		priv->stats.rx_packets++;
+		priv->stats.rx_bytes += length;
+	}
 
-        /* Maintain stats */
-	npackets++;
-	priv->stats.rx_packets++;
-	priv->stats.rx_bytes += length;
 	goto anotherpacket;
 
 drop_packet:
@@ -484,11 +486,8 @@ __visible void smp_mmnif_interrupt(struct pt_regs *regs)
 	}
 
 	priv = netdev_priv(mmnif_dev);
-
-	if (!spin_trylock(&priv->lock))
-		return;
-	mmnif_rx(mmnif_dev, priv);
-        spin_unlock(&priv->lock);
+	if (priv)
+		wake_up_process(priv->kthr);
 
 leave_handler:
 	irq_exit();
@@ -511,17 +510,40 @@ __visible void smp_trace_mmnif_interrupt(struct pt_regs *regs)
 	}
 
 	priv = netdev_priv(mmnif_dev);
-
-	if (!spin_trylock(&priv->lock))
-		return;
-	mmnif_rx(mmnif_dev, priv);
-	spin_unlock(&priv->lock);
+	if (priv)
+		wake_up_process(priv->kthr);
 
 leave_handler:
         trace_mmnif_exit(MMNIF_VECTOR);
 	irq_exit();
 }
 #endif
+
+static int mmnif_thread(void* data)
+{
+	struct mmnif_private *priv;
+
+	if (!mmnif_dev)
+		return -EINVAL;
+
+	priv = netdev_priv(mmnif_dev);
+	if (!priv)
+		return -EINVAL;
+
+	while (!kthread_should_stop()) {
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule();
+
+		if (!mmnif_dev)
+			break;
+
+		spin_lock(&priv->lock);
+		mmnif_rx(mmnif_dev, priv);
+		spin_unlock(&priv->lock);
+	}
+
+	return 0;
+}
 
 static void mmnif_setup(struct net_device *dev)
 {
@@ -570,6 +592,7 @@ static int __init mmnif_init(void)
 	spin_lock_init(&priv->lock);
 	priv->dev = dev;
 	hermit_get_mmnif_data(priv);
+	priv->kthr = kthread_run(mmnif_thread, NULL, "mmnif");
 
 	if ((ret = register_netdev(dev))) {
 		printk(KERN_ERR "%s: register network device failed\n", dev->name);
@@ -591,6 +614,10 @@ static void mmnif_cleanup(void)
 {
 	if (mmnif_dev)
 	{
+		struct mmnif_private *priv = netdev_priv(mmnif_dev);
+
+		if (priv)
+			kthread_stop(priv->kthr);
 		unregister_netdev(mmnif_dev);
 		free_netdev(mmnif_dev);
 		mmnif_dev = NULL;

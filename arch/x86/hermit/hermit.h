@@ -106,6 +106,7 @@ struct mmnif_private {
         struct net_device_stats stats;
         struct net_device *dev;
         spinlock_t lock;
+	struct task_struct* kthr;
 };
 
 inline static int islelock_init(islelock_t* s)
