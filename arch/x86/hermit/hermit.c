@@ -109,16 +109,6 @@ void hermit_get_mmnif_data(struct mmnif_private* priv)
 	priv->rx_buff->dcount = MMNIF_MAX_DESCRIPTORS;
 }
 
-static inline void set_ipi_dest(uint32_t cpu_id)
-{
-	uint32_t tmp;
-
-	tmp = apic_read(APIC_ICR2);
-	tmp &= 0x00FFFFFF;
-	tmp |= (cpu_id << 24);
-	apic_write(APIC_ICR2, tmp);
-}
-
 static inline void smpboot_setup_warm_reset_vector(unsigned long start_eip)
 {
 	unsigned long flags;
@@ -154,30 +144,10 @@ static inline void smpboot_restore_warm_reset_vector(void)
 }
 
 /*
- * Create an own udelay function to avoid a rescheduling within
- * a section, where the interrupts are disabled.
- */
-static inline void hermit_udelay(uint32_t usecs)
-{
-	uint64_t diff, end, start;
-	uint64_t deadline = (tsc_khz / 1000)  * usecs;
-
-	rdtscll(start);
-	do {
-		mb();
-		rdtscll(end);
-		diff = end > start ? end - start : start - end;
-		if (diff < deadline)
-			rep_nop();
-	} while(diff < deadline);
-}
-
-/*
  * Wake up a core and boot HermitCore on it
  */
 static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 {
-	int i;
 	unsigned int start_eip;
 	int apicid = apic->cpu_present_to_apicid(cpu);
 
@@ -273,58 +243,26 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 
 	*((uint32_t*) (hermit_base[isle] + 0x30)) = apicid;
 
-	smp_mb();
-	local_irq_disable();
-
 	smpboot_setup_warm_reset_vector(start_eip);
 	smp_mb();
 
 	/*
 	 * use the universal startup algorithm of Intel's MultiProcessor Specification
 	 */
-	if (x2apic_enabled()) {
-		uint64_t dest = ((uint64_t)apicid << 32);
-
-		//pr_debug("X2APIC is enabled\n");
-
-		wrmsrl(0x800 + (APIC_ICR >> 4), dest|APIC_INT_LEVELTRIG|APIC_INT_ASSERT|APIC_DM_INIT);
-		hermit_udelay(200);
-		/* reset INIT */
-		wrmsrl(0x800 + (APIC_ICR >> 4), APIC_INT_LEVELTRIG|APIC_DM_INIT);
-		hermit_udelay(10000);
-		/* send out the startup */
-		wrmsrl(0x800 + (APIC_ICR >> 4), dest|APIC_DM_STARTUP|(start_eip >> 12));
-		hermit_udelay(200);
-		/* do it again */
-		wrmsrl(0x800 + (APIC_ICR >> 4), dest|APIC_DM_STARTUP|(start_eip >> 12));
-		hermit_udelay(200);
-	} else {
-		//pr_debug("X2APIC is disabled\n");
-
-		set_ipi_dest(apicid);
-		apic_write(APIC_ICR, APIC_INT_LEVELTRIG|APIC_INT_ASSERT|APIC_DM_INIT);
-		hermit_udelay(200);
-		/* reset INIT */
-		apic_write(APIC_ICR, APIC_INT_LEVELTRIG|APIC_DM_INIT);
-		hermit_udelay(10000);
-		/* send out the startup */
-		set_ipi_dest(apicid);
-		apic_write(APIC_ICR, APIC_DM_STARTUP|(start_eip >> 12));
-		hermit_udelay(200);
-		/* do it again */
-		set_ipi_dest(apicid);
-		apic_write(APIC_ICR, APIC_DM_STARTUP|(start_eip >> 12));
-		hermit_udelay(200);
-
-		i = 0;
-		while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (i < 1000))
-			i++; /* wait for it to finish, give up eventualy tho */
-	}
-
-	local_irq_enable();
+	apic_icr_write(APIC_INT_LEVELTRIG|APIC_INT_ASSERT|APIC_DM_INIT, apicid);
+	udelay(200);
+	/* reset INIT */
+	apic_icr_write(APIC_INT_LEVELTRIG|APIC_DM_INIT, apicid);
+	udelay(10000);
+	/* send out the startup */
+	apic_icr_write(APIC_DM_STARTUP|(start_eip >> 12), apicid);
+	udelay(200);
+	/* do it again */
+	apic_icr_write(APIC_DM_STARTUP|(start_eip >> 12), apicid);
+	udelay(200);
 
 	cpu_counter++;
-	while(*((volatile uint32_t*) (hermit_base[isle] + 0x20)) < cpu_counter) { rep_nop(); }
+	while(*((volatile uint32_t*) (hermit_base[isle] + 0x20)) < cpu_counter) { cpu_relax(); }
 
 	smpboot_restore_warm_reset_vector();
 
@@ -363,46 +301,16 @@ static ssize_t hermit_is_cpus(struct kobject *kobj, struct kobj_attribute *attr,
 	return ret;
 }
 
-static int apic_send_ipi(int dest, uint8_t irq)
+static inline int apic_send_ipi(int dest, uint8_t irq)
 {
 	int apicid = apic->cpu_present_to_apicid(dest);
-	int ret = -EBUSY;
 
-	local_irq_disable();
+	apic_icr_write(APIC_INT_ASSERT|APIC_DM_FIXED|irq, apicid);
 
-        if (x2apic_enabled()) {
-		uint64_t dest = ((uint64_t)apicid << 32);
-
-                wrmsrl(0x830, dest|APIC_INT_ASSERT|APIC_DM_FIXED|irq);
-
-		ret = 0;
-        } else {
-		uint32_t j;
-
-                if (apic_read(APIC_ICR) & APIC_ICR_BUSY) {
-                        printk("ERROR: previous send not complete");
-			goto Lerr;
-                }
-
-                set_ipi_dest(apicid);
-                apic_write(APIC_ICR, APIC_INT_ASSERT|APIC_DM_FIXED|irq);
-
-                j = 0;
-                while((apic_read(APIC_ICR) & APIC_ICR_BUSY) && (j < 1000))
-                        j++; // wait for it to finish, give up eventualy tho
-
-		if (j >= 1000)
-			pr_notice("ERROR: send not complete");
-		else ret = 0;
-        }
-
-Lerr:
-	local_irq_enable();
-
-        return ret;
+        return 0;
 }
 
-static int shutdown_hermit_core(unsigned cpu)
+static inline int shutdown_hermit_core(unsigned cpu)
 {
 	return apic_send_ipi(cpu, 81+32);
 }
@@ -445,7 +353,7 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 		}
 
 		while (*((volatile uint32_t*) (hermit_base[isle] + 0x20)) > 0) {
-			rep_nop();
+			cpu_relax();
 		}
 
 		// be sure that the processors are in halted state
@@ -820,10 +728,14 @@ int hermit_trigger_irq(int dest)
 	if (dest < 1)
 	 	return -EINVAL;
 
+	arch_spin_lock(&boot_lock);
+
 	for(i=0; (cpu == -1) && (i<NR_CPUS); i++) {
 		if (hcpu_online[i] == dest-1)
 			cpu = i;
 	}
+
+	arch_spin_unlock(&boot_lock);
 
 	if (cpu == -1)
 		return -EINVAL;
