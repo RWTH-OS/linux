@@ -49,6 +49,7 @@
 #include <linux/spinlock.h>
 #include <linux/slab.h>
 #include <linux/mc146818rtc.h>
+#include <linux/elf.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/delay.h>
@@ -143,6 +144,88 @@ static inline void smpboot_restore_warm_reset_vector(void)
 	*((volatile u32 *)phys_to_virt(TRAMPOLINE_PHYS_LOW)) = 0;
 }
 
+static ssize_t load_elf(const char *filen, char *base)
+{
+	struct file *file;
+	struct elfhdr ehdr;
+	struct elf_phdr phdr;
+
+	int i;
+	ssize_t sz, pos, bytes;
+	loff_t offset;
+
+	file = filp_open(path2hermit, O_RDONLY, 0);
+	if (IS_ERR(file)) {
+		int rc = PTR_ERR(file);
+		pr_err("Unable to open file: %s (%d)\n", path2hermit, rc);
+		return rc;
+	}
+
+	if (kernel_read(file, 0, (char *) &ehdr, sizeof(ehdr)) != sizeof(ehdr)) {
+		pr_err("Unable to load ELF header\n");
+		goto out;
+	}
+
+	/* Check if this is an ELF file */
+	if (memcmp(ehdr.e_ident, ELFMAG, SELFMAG) != 0) {
+		pr_err("This is not an ELF binary\n");
+		goto out;
+	}
+
+	/* Verify that it's really a Hermit app */
+	if (ehdr.e_ident[EI_OSABI] != ELFOSABI_HERMIT) {
+		pr_err("This is not a Hermit application\n");
+		goto out;
+	}
+
+	if (ehdr.e_phoff == 0) {
+		pr_err("Missing ELF program headers\n");
+		goto out;
+	}
+
+	if (!elf_check_arch(&ehdr)) {
+		pr_err("Hermit only supports x86 at the moment\n");
+		goto out;
+	}
+
+	for (i=0; i<ehdr.e_phnum; i++) {
+		offset = ehdr.e_phoff + i * ehdr.e_phentsize;
+
+		if (kernel_read(file, offset, (char *) &phdr, sizeof(phdr)) != sizeof(phdr))
+			goto out;
+
+		if (phdr.p_type == PT_LOAD) {
+			offset = phdr.p_offset;
+			sz     = phdr.p_filesz;
+
+			goto found;
+		}
+	}
+
+	pr_err("Missing LOAD segment\n");
+
+out:
+	filp_close(file, NULL);
+
+	return -EIO;
+
+found:
+	pr_debug("Loading HermitCore's kernel image with a size of %d KiB\n", (int) sz >> 10);
+
+	/* Load kernel to hermit_base */
+	for (pos=0; pos<sz; pos+=bytes) {
+		bytes = kernel_read(file, offset, base + pos, sz - pos);
+		if (bytes == 0)
+			break;
+		if (bytes < 0)
+			goto out;
+	}
+
+	filp_close(file, NULL);
+
+	return sz;
+}
+
 /*
  * Wake up a core and boot HermitCore on it
  */
@@ -160,6 +243,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 
 	if (!hermit_trampoline)
 		return -EINVAL;
+
 	start_eip = (unsigned int) virt_to_phys(hermit_trampoline);
 
 	if (!hermit_base[isle])
@@ -186,37 +270,13 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 	*((uint32_t*) (hermit_trampoline+0x18D)) += start_eip;
 
 	if (!cpu_counter) {
-		struct file * file;
-		ssize_t sz, pos;
-		ssize_t bytes;
+		ssize_t sz;
 
-		file = filp_open(path2hermit, O_RDONLY, 0);
-		if (IS_ERR(file)) {
-			int rc = PTR_ERR(file);
-			pr_err("Unable to open file: %s (%d)\n", path2hermit, rc);
-			return rc;
-		}
+		sz = load_elf(path2hermit, hermit_base[isle]);
+		if (sz < 0)
+			return -EINVAL;
 
-		sz = i_size_read(file_inode(file));
-		if (sz <= 0)
-			return -EIO;
-		pr_debug("Loading HermitCore's kernel image with a size of %d KiB\n", (int) sz >> 10);
 		pr_debug("CPU: %d MHz, TSC: %d MHz\n", cpu_khz / 1000, tsc_khz / 1000);
-
-		pos = 0;
-		while (pos < sz) {
-			bytes = kernel_read(file, pos, hermit_base[isle] + pos, sz - pos);
-			if (bytes < 0) {
-				pr_notice("Unable to load HermitCore's kernel\n");
-				filp_close(file, NULL);
-				return -EIO;
-                	}
-			if (bytes == 0)
-				break;
-			pos += bytes;
-		}
-
-		filp_close(file, NULL);
 
 		/*
 		 * set base, limit and cpu frequency in HermitCore's kernel
