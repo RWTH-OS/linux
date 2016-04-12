@@ -69,7 +69,7 @@
 static struct kobject *hermit_kobj = NULL;
 static struct kobject *isle_kobj[NR_CPUS] = {[0 ... NR_CPUS-1] = NULL};
 static int hcpu_online[NR_CPUS] = {[0 ... NR_CPUS-1] = -1};
-static char path2hermit[MAX_NUMNODES][NAME_SIZE] = {[0 ... MAX_NUMNODES-1] = ""};
+static char* path2hermit[MAX_NUMNODES] = {[0 ... MAX_NUMNODES-1] = NULL};
 static char* hermit_base[1 << NODES_SHIFT] = {[0 ... (1 << NODES_SHIFT)-1] = NULL};
 static arch_spinlock_t boot_lock = __ARCH_SPIN_LOCK_UNLOCKED;
 static size_t pool_size = 0x80000000ULL;
@@ -153,6 +153,9 @@ static ssize_t load_elf(const char *filen, char *base)
 	int i;
 	ssize_t sz, pos, bytes;
 	loff_t offset;
+
+	if (!filen)
+		return -EINVAL;
 
 	file = filp_open(filen, O_RDONLY, 0);
 	if (IS_ERR(file)) {
@@ -521,8 +524,12 @@ static ssize_t hermit_get_path(struct kobject *kobj, struct kobj_attribute *attr
 
 	kfree(path);
 
-	if ((isle >= 0) && (isle < MAX_NUMNODES))
-		return sprintf(buf, "%s\n", path2hermit[isle]);
+	if ((isle >= 0) && (isle < MAX_NUMNODES)) {
+		if (path2hermit[isle])
+			return sprintf(buf, "%s\n", path2hermit[isle]);
+		else
+			return sprintf(buf, "\n");
+	}
 
 	return -EINVAL;
 }
@@ -543,8 +550,16 @@ static ssize_t hermit_set_path(struct kobject *kobj, struct kobj_attribute *attr
 
 	kfree(path);
 
-	if ((isle >= 0) && (isle < MAX_NUMNODES))
-		return snprintf(path2hermit[isle], NAME_SIZE, "%s", buf);
+	if ((isle >= 0) && (isle < MAX_NUMNODES)) {
+		if (path2hermit[isle])
+			kfree(path2hermit[isle]);
+
+		path2hermit[isle] = kmalloc(strlen(buf)+1, GFP_KERNEL);
+		if (!path2hermit[isle])
+			return -ENOMEM;
+
+		return sprintf(path2hermit[isle], "%s", buf);
+	}
 
 	return -EINVAL;
 }
