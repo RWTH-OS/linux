@@ -69,7 +69,7 @@
 static struct kobject *hermit_kobj = NULL;
 static struct kobject *isle_kobj[NR_CPUS] = {[0 ... NR_CPUS-1] = NULL};
 static int hcpu_online[NR_CPUS] = {[0 ... NR_CPUS-1] = -1};
-static char path2hermit[NAME_SIZE] = "/hermit/hermit.bin";
+static char path2hermit[MAX_NUMNODES][NAME_SIZE] = {[0 ... MAX_NUMNODES-1] = ""};
 static char* hermit_base[1 << NODES_SHIFT] = {[0 ... (1 << NODES_SHIFT)-1] = NULL};
 static arch_spinlock_t boot_lock = __ARCH_SPIN_LOCK_UNLOCKED;
 static size_t pool_size = 0x80000000ULL;
@@ -154,10 +154,10 @@ static ssize_t load_elf(const char *filen, char *base)
 	ssize_t sz, pos, bytes;
 	loff_t offset;
 
-	file = filp_open(path2hermit, O_RDONLY, 0);
+	file = filp_open(filen, O_RDONLY, 0);
 	if (IS_ERR(file)) {
 		int rc = PTR_ERR(file);
-		pr_err("Unable to open file: %s (%d)\n", path2hermit, rc);
+		pr_err("Unable to open file: %s (%d)\n", filen, rc);
 		return rc;
 	}
 
@@ -272,7 +272,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 	if (!cpu_counter) {
 		ssize_t sz;
 
-		sz = load_elf(path2hermit, hermit_base[isle]);
+		sz = load_elf(path2hermit[isle], hermit_base[isle]);
 		if (sz < 0)
 			return -EINVAL;
 
@@ -511,7 +511,20 @@ static ssize_t hermit_get_log(struct kobject *kobj, struct kobj_attribute *attr,
 static ssize_t hermit_get_path(struct kobject *kobj, struct kobj_attribute *attr,
                                 char *buf)
 {
-	return sprintf(buf, "%s\n", path2hermit);
+	int isle = MAX_NUMNODES;
+	char* path = kobject_get_path(kobj, GFP_KERNEL);
+
+	if (!path)
+		return -EINVAL;
+
+	sscanf(path, "/hermit/isle%d", &isle);
+
+	kfree(path);
+
+	if ((isle >= 0) && (isle < MAX_NUMNODES))
+		return sprintf(buf, "%s\n", path2hermit[isle]);
+
+	return -EINVAL;
 }
 
 /*
@@ -520,7 +533,20 @@ static ssize_t hermit_get_path(struct kobject *kobj, struct kobj_attribute *attr
 static ssize_t hermit_set_path(struct kobject *kobj, struct kobj_attribute *attr,
                                 const char *buf, size_t count)
 {
-	return snprintf(path2hermit, NAME_SIZE, "%s", buf);
+	int isle = MAX_NUMNODES;
+	char* path = kobject_get_path(kobj, GFP_KERNEL);
+
+	if (!path)
+		return -EINVAL;
+
+	sscanf(path, "/hermit/isle%d", &isle);
+
+	kfree(path);
+
+	if ((isle >= 0) && (isle < MAX_NUMNODES))
+		return snprintf(path2hermit[isle], NAME_SIZE, "%s", buf);
+
+	return -EINVAL;
 }
 
 /*
@@ -561,12 +587,12 @@ static ssize_t hermit_get_base(struct kobject *kobj, struct kobj_attribute *attr
  * Usage:
  * Boot CPU X            : echo 1 > /sys/hermit/isleX/cpus
  * Boot CPU X-Y		 : echo 1-2 > /sys/hermit/isleX/cpus
- * Shut down all CPUs    : echo -1 > /sys/hermit/isleX/online
- * Show log messages     : cat /sys/hermit/log
- * Start address         : cat /sys/hermit/base
+ * Shut down all CPUs    : echo -1 > /sys/hermit/isleX/cpus
+ * Start address         : cat /sys/hermit/isleX/base
+ * Show log messages     : cat /sys/hermit/isleX/log
  * Memory size           : cat /sys/hermit/memsize
- * Set path to HermitCore: echo "/hermit.bin" > /sys/hermit/path
- * Get path to HermitCore: cat /sys/hermit/path
+ * Set path to the app   : echo "/demo" > /sys/hermit/isleX/path
+ * Get path to the app   : cat /sys/hermit/isleX/path
  */
 
 static struct kobj_attribute cpu_attribute =
@@ -588,11 +614,11 @@ static struct attribute * isle_attrs[] = {
 	&cpu_attribute.attr,
 	&log_attribute.attr,
 	&base_attribute.attr,
+	&path_attribute.attr,
 	NULL
 };
 
 static struct attribute * hermit_attrs[] = {
-	&path_attribute.attr,
 	&memsize_attribute.attr,
 	NULL
 };
