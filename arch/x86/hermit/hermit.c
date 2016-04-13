@@ -716,13 +716,13 @@ int __init hermit_init(void)
 	header_phy_start_address = (char*) mem;
 	pr_notice("HermitCore's mmnif header at 0x%p\n", header_phy_start_address);
 
-	mem = memblock_find_in_range(1 << 15, 1 << 23, 4 * sizeof(unsigned int) * (num_possible_nodes() + 1), PAGE_SIZE);
+	mem = memblock_find_in_range(1 << 15, 1 << 23, L1_CACHE_BYTES * (num_possible_nodes() + 1), PAGE_SIZE);
 	if (!mem) {
 		ret = -ENOMEM;
 		goto _exit;
 	}
 
-	ret = memblock_reserve(mem, sizeof(islelock_t) * (num_possible_nodes() + 1));
+	ret = memblock_reserve(mem, L1_CACHE_BYTES * (num_possible_nodes() + 1));
 	if (ret) {
 		ret = -ENOMEM;
 		goto _exit;
@@ -748,7 +748,7 @@ int __init hermit_init(void)
 
         // init RCCE locks
 	tmp = (int*) phys_to_virt(mem);
-	memset(tmp, 0x00, PAGE_SIZE);
+	memset(tmp, 0x00, L1_CACHE_BYTES * (num_possible_nodes() + 1));
 	tmp[1] = 1;
 
 	/* allocate for each HermitCore instance */
