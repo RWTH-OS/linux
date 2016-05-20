@@ -18,7 +18,7 @@ script:
 - make -j2 bzImage
 after_success:
 - export SSHPASS=$DEPLOY_PASS
-- sshpass -e scp -o stricthostkeychecking=no bootstrap.tar.gz $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH 2> /dev/null
+- sshpass -e scp -o stricthostkeychecking=no arch/x86/boot/bzImage $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH 2> /dev/null
 env:
    global:
      - TOPDIR=`pwd`/../..
