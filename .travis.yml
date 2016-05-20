@@ -10,8 +10,8 @@ before_install:
   sshpass
 script:
 - cd $TOPDIR
-- wget https://www.lankes.org/deploy/linux_config_fc23
-- mv linux_config_fc23 .config
+- wget https://www.lankes.org/deploy/linux_config
+- mv linux_config .config
 - make -j2 bzImage
 after_success:
 - export SSHPASS=$DEPLOY_PASS
