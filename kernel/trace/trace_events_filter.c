@@ -252,6 +252,50 @@ static int filter_pred_strloc(struct filter_pred *pred, void *event)
 	return match;
 }
 
+/* Filter predicate for CPUs. */
+static int filter_pred_cpu(struct filter_pred *pred, void *event)
+{
+	int cpu, cmp;
+	int match = 0;
+
+	cpu = raw_smp_processor_id();
+	cmp = pred->val;
+
+	switch (pred->op) {
+	case OP_EQ:
+		match = cpu == cmp;
+		break;
+	case OP_LT:
+		match = cpu < cmp;
+		break;
+	case OP_LE:
+		match = cpu <= cmp;
+		break;
+	case OP_GT:
+		match = cpu > cmp;
+		break;
+	case OP_GE:
+		match = cpu >= cmp;
+		break;
+	default:
+		break;
+	}
+
+	return !!match == !pred->not;
+}
+
+/* Filter predicate for COMM. */
+static int filter_pred_comm(struct filter_pred *pred, void *event)
+{
+	int cmp, match;
+
+	cmp = pred->regex.match(current->comm, &pred->regex,
+				pred->regex.field_len);
+	match = cmp ^ pred->not;
+
+	return match;
+}
+
 static int filter_pred_none(struct filter_pred *pred, void *event)
 {
 	return 0;
@@ -929,15 +973,15 @@ static bool is_string_field(struct ftrace_event_field *field)
 	       field->filter_type == FILTER_PTR_STRING;
 }
 
-static int is_legal_op(struct ftrace_event_field *field, int op)
+static bool is_legal_op(struct ftrace_event_field *field, int op)
 {
 	if (is_string_field(field) &&
 	    (op != OP_EQ && op != OP_NE && op != OP_GLOB))
-		return 0;
+		return false;
 	if (!is_string_field(field) && op == OP_GLOB)
-		return 0;
+		return false;
 
-	return 1;
+	return true;
 }
 
 static filter_pred_fn_t select_comparison_fn(int op, int field_size,
@@ -999,7 +1043,11 @@ static int init_pred(struct filter_parse_state *ps,
 		return -EINVAL;
 	}
 
-	if (is_string_field(field)) {
+	if (field->filter_type == FILTER_COMM) {
+		filter_build_regex(pred);
+		fn = filter_pred_comm;
+		pred->regex.field_len = TASK_COMM_LEN;
+	} else if (is_string_field(field)) {
 		filter_build_regex(pred);
 
 		if (field->filter_type == FILTER_STATIC_STRING) {
@@ -1025,7 +1073,10 @@ static int init_pred(struct filter_parse_state *ps,
 		}
 		pred->val = val;
 
-		fn = select_comparison_fn(pred->op, field->size,
+		if (field->filter_type == FILTER_CPU)
+			fn = filter_pred_cpu;
+		else
+			fn = select_comparison_fn(pred->op, field->size,
 					  field->is_signed);
 		if (!fn) {
 			parse_error(ps, FILT_ERR_INVALID_OP, 0);

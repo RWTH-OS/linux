@@ -298,6 +298,10 @@ bool amdgpu_atombios_encoder_mode_fixup(struct drm_encoder *encoder,
 	    && (mode->crtc_vsync_start < (mode->crtc_vdisplay + 2)))
 		adjusted_mode->crtc_vsync_start = adjusted_mode->crtc_vdisplay + 2;
 
+	/* vertical FP must be at least 1 */
+	if (mode->crtc_vsync_start == mode->crtc_vdisplay)
+		adjusted_mode->crtc_vsync_start++;
+
 	/* get the native mode for scaling */
 	if (amdgpu_encoder->active_device & (ATOM_DEVICE_LCD_SUPPORT))
 		amdgpu_panel_mode_fixup(encoder, adjusted_mode);
@@ -812,7 +816,7 @@ amdgpu_atombios_encoder_setup_dig_transmitter(struct drm_encoder *encoder, int a
 			else
 				args.v1.ucConfig |= ATOM_TRANSMITTER_CONFIG_DIG1_ENCODER;
 
-			if ((adev->flags & AMDGPU_IS_APU) &&
+			if ((adev->flags & AMD_IS_APU) &&
 			    (amdgpu_encoder->encoder_id == ENCODER_OBJECT_ID_INTERNAL_UNIPHY)) {
 				if (is_dp ||
 				    !amdgpu_dig_monitor_is_duallink(encoder, amdgpu_encoder->pixel_clock)) {

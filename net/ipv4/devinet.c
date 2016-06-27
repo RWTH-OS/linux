@@ -334,6 +334,9 @@ static void __inet_del_ifa(struct in_device *in_dev, struct in_ifaddr **ifap,
 
 	ASSERT_RTNL();
 
+	if (in_dev->dead)
+		goto no_promotions;
+
 	/* 1. Deleting primary ifaddr forces deletion all secondaries
 	 * unless alias promotion is set
 	 **/
@@ -380,6 +383,7 @@ static void __inet_del_ifa(struct in_device *in_dev, struct in_ifaddr **ifap,
 			fib_del_ifaddr(ifa, ifa1);
 	}
 
+no_promotions:
 	/* 2. Unlink it */
 
 	*ifap = ifa1->ifa_next;
@@ -1644,7 +1648,8 @@ errout:
 		rtnl_set_sk_err(net, RTNLGRP_IPV4_IFADDR, err);
 }
 
-static size_t inet_get_link_af_size(const struct net_device *dev)
+static size_t inet_get_link_af_size(const struct net_device *dev,
+				    u32 ext_filter_mask)
 {
 	struct in_device *in_dev = rcu_dereference_rtnl(dev->ip_ptr);
 
@@ -1654,7 +1659,8 @@ static size_t inet_get_link_af_size(const struct net_device *dev)
 	return nla_total_size(IPV4_DEVCONF_MAX * 4); /* IFLA_INET_CONF */
 }
 
-static int inet_fill_link_af(struct sk_buff *skb, const struct net_device *dev)
+static int inet_fill_link_af(struct sk_buff *skb, const struct net_device *dev,
+			     u32 ext_filter_mask)
 {
 	struct in_device *in_dev = rcu_dereference_rtnl(dev->ip_ptr);
 	struct nlattr *nla;
@@ -1845,7 +1851,7 @@ static int inet_netconf_get_devconf(struct sk_buff *in_skb,
 	if (err < 0)
 		goto errout;
 
-	err = EINVAL;
+	err = -EINVAL;
 	if (!tb[NETCONFA_IFINDEX])
 		goto errout;
 
@@ -2397,4 +2403,3 @@ void __init devinet_init(void)
 	rtnl_register(PF_INET, RTM_GETNETCONF, inet_netconf_get_devconf,
 		      inet_netconf_dump_devconf, NULL);
 }
-

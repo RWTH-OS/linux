@@ -12,8 +12,9 @@
  * GNU General Public License for more details.
  *
  * (C) Copyright 2013-2015 Hewlett-Packard Development Company, L.P.
+ * (C) Copyright 2015 Hewlett-Packard Enterprise Development LP
  *
- * Authors: Waiman Long <waiman.long@hp.com>
+ * Authors: Waiman Long <waiman.long@hpe.com>
  */
 #ifndef __ASM_GENERIC_QSPINLOCK_H
 #define __ASM_GENERIC_QSPINLOCK_H
@@ -27,7 +28,30 @@
  */
 static __always_inline int queued_spin_is_locked(struct qspinlock *lock)
 {
-	return atomic_read(&lock->val);
+	/*
+	 * queued_spin_lock_slowpath() can ACQUIRE the lock before
+	 * issuing the unordered store that sets _Q_LOCKED_VAL.
+	 *
+	 * See both smp_cond_acquire() sites for more detail.
+	 *
+	 * This however means that in code like:
+	 *
+	 *   spin_lock(A)		spin_lock(B)
+	 *   spin_unlock_wait(B)	spin_is_locked(A)
+	 *   do_something()		do_something()
+	 *
+	 * Both CPUs can end up running do_something() because the store
+	 * setting _Q_LOCKED_VAL will pass through the loads in
+	 * spin_unlock_wait() and/or spin_is_locked().
+	 *
+	 * Avoid this by issuing a full memory barrier between the spin_lock()
+	 * and the loads in spin_unlock_wait() and spin_is_locked().
+	 *
+	 * Note that regular mutual exclusion doesn't care about this
+	 * delayed store.
+	 */
+	smp_mb();
+	return atomic_read(&lock->val) & _Q_LOCKED_MASK;
 }
 
 /**
@@ -62,7 +86,7 @@ static __always_inline int queued_spin_is_contended(struct qspinlock *lock)
 static __always_inline int queued_spin_trylock(struct qspinlock *lock)
 {
 	if (!atomic_read(&lock->val) &&
-	   (atomic_cmpxchg(&lock->val, 0, _Q_LOCKED_VAL) == 0))
+	   (atomic_cmpxchg_acquire(&lock->val, 0, _Q_LOCKED_VAL) == 0))
 		return 1;
 	return 0;
 }
@@ -77,7 +101,7 @@ static __always_inline void queued_spin_lock(struct qspinlock *lock)
 {
 	u32 val;
 
-	val = atomic_cmpxchg(&lock->val, 0, _Q_LOCKED_VAL);
+	val = atomic_cmpxchg_acquire(&lock->val, 0, _Q_LOCKED_VAL);
 	if (likely(val == 0))
 		return;
 	queued_spin_lock_slowpath(lock, val);
@@ -93,7 +117,7 @@ static __always_inline void queued_spin_unlock(struct qspinlock *lock)
 	/*
 	 * smp_mb__before_atomic() in order to guarantee release semantics
 	 */
-	smp_mb__before_atomic_dec();
+	smp_mb__before_atomic();
 	atomic_sub(_Q_LOCKED_VAL, &lock->val);
 }
 #endif
@@ -107,6 +131,8 @@ static __always_inline void queued_spin_unlock(struct qspinlock *lock)
  */
 static inline void queued_spin_unlock_wait(struct qspinlock *lock)
 {
+	/* See queued_spin_is_locked() */
+	smp_mb();
 	while (atomic_read(&lock->val) & _Q_LOCKED_MASK)
 		cpu_relax();
 }

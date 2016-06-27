@@ -258,7 +258,7 @@ static bool sfb_classify(struct sk_buff *skb, struct tcf_proto *fl,
 	struct tcf_result res;
 	int result;
 
-	result = tc_classify(skb, fl, &res);
+	result = tc_classify(skb, fl, &res, false);
 	if (result >= 0) {
 #ifdef CONFIG_NET_CLS_ACT
 		switch (result) {
@@ -502,7 +502,7 @@ static int sfb_change(struct Qdisc *sch, struct nlattr *opt)
 
 	limit = ctl->limit;
 	if (limit == 0)
-		limit = max_t(u32, qdisc_dev(sch)->tx_queue_len, 1);
+		limit = qdisc_dev(sch)->tx_queue_len;
 
 	child = fifo_create_dflt(sch, &pfifo_qdisc_ops, limit);
 	if (IS_ERR(child))
@@ -510,7 +510,8 @@ static int sfb_change(struct Qdisc *sch, struct nlattr *opt)
 
 	sch_tree_lock(sch);
 
-	qdisc_tree_decrease_qlen(q->qdisc, q->qdisc->q.qlen);
+	qdisc_tree_reduce_backlog(q->qdisc, q->qdisc->q.qlen,
+				  q->qdisc->qstats.backlog);
 	qdisc_destroy(q->qdisc);
 	q->qdisc = child;
 
@@ -606,12 +607,7 @@ static int sfb_graft(struct Qdisc *sch, unsigned long arg, struct Qdisc *new,
 	if (new == NULL)
 		new = &noop_qdisc;
 
-	sch_tree_lock(sch);
-	*old = q->qdisc;
-	q->qdisc = new;
-	qdisc_tree_decrease_qlen(*old, (*old)->q.qlen);
-	qdisc_reset(*old);
-	sch_tree_unlock(sch);
+	*old = qdisc_replace(sch, new, &q->qdisc);
 	return 0;
 }
 

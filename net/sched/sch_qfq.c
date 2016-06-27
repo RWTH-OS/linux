@@ -186,7 +186,6 @@ struct qfq_sched {
 
 	u64			oldV, V;	/* Precise virtual times. */
 	struct qfq_aggregate	*in_serv_agg;   /* Aggregate being served. */
-	u32			num_active_agg; /* Num. of active aggregates */
 	u32			wsum;		/* weight sum */
 	u32			iwsum;		/* inverse weight sum */
 
@@ -221,9 +220,10 @@ static struct qfq_class *qfq_find_class(struct Qdisc *sch, u32 classid)
 static void qfq_purge_queue(struct qfq_class *cl)
 {
 	unsigned int len = cl->qdisc->q.qlen;
+	unsigned int backlog = cl->qdisc->qstats.backlog;
 
 	qdisc_reset(cl->qdisc);
-	qdisc_tree_decrease_qlen(cl->qdisc, len);
+	qdisc_tree_reduce_backlog(cl->qdisc, len, backlog);
 }
 
 static const struct nla_policy qfq_policy[TCA_QFQ_MAX + 1] = {
@@ -618,11 +618,7 @@ static int qfq_graft_class(struct Qdisc *sch, unsigned long arg,
 			new = &noop_qdisc;
 	}
 
-	sch_tree_lock(sch);
-	qfq_purge_queue(cl);
-	*old = cl->qdisc;
-	cl->qdisc = new;
-	sch_tree_unlock(sch);
+	*old = qdisc_replace(sch, new, &cl->qdisc);
 	return 0;
 }
 
@@ -718,7 +714,7 @@ static struct qfq_class *qfq_classify(struct sk_buff *skb, struct Qdisc *sch,
 
 	*qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
 	fl = rcu_dereference_bh(q->filter_list);
-	result = tc_classify(skb, fl, &res);
+	result = tc_classify(skb, fl, &res, false);
 	if (result >= 0) {
 #ifdef CONFIG_NET_CLS_ACT
 		switch (result) {

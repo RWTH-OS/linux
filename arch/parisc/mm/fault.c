@@ -151,6 +151,7 @@ int fixup_exception(struct pt_regs *regs)
 		struct exception_data *d;
 		d = this_cpu_ptr(&exception_data);
 		d->fault_ip = regs->iaoq[0];
+		d->fault_gp = regs->gr[27];
 		d->fault_space = regs->isr;
 		d->fault_addr = regs->ior;
 
@@ -207,7 +208,7 @@ void do_page_fault(struct pt_regs *regs, unsigned long code,
 	int fault;
 	unsigned int flags;
 
-	if (pagefault_disabled())
+	if (faulthandler_disabled())
 		goto no_context;
 
 	tsk = current;

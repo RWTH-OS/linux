@@ -368,11 +368,21 @@ static unsigned int hhf_drop(struct Qdisc *sch)
 	return bucket - q->buckets;
 }
 
+static unsigned int hhf_qdisc_drop(struct Qdisc *sch)
+{
+	unsigned int prev_backlog;
+
+	prev_backlog = sch->qstats.backlog;
+	hhf_drop(sch);
+	return prev_backlog - sch->qstats.backlog;
+}
+
 static int hhf_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
 	struct hhf_sched_data *q = qdisc_priv(sch);
 	enum wdrr_bucket_idx idx;
 	struct wdrr_bucket *bucket;
+	unsigned int prev_backlog;
 
 	idx = hhf_classify(skb, sch);
 
@@ -400,6 +410,7 @@ static int hhf_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	if (++sch->q.qlen <= sch->limit)
 		return NET_XMIT_SUCCESS;
 
+	prev_backlog = sch->qstats.backlog;
 	q->drop_overlimit++;
 	/* Return Congestion Notification only if we dropped a packet from this
 	 * bucket.
@@ -408,7 +419,7 @@ static int hhf_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		return NET_XMIT_CN;
 
 	/* As we dropped a packet, better let upper stack know this. */
-	qdisc_tree_decrease_qlen(sch, 1);
+	qdisc_tree_reduce_backlog(sch, 1, prev_backlog - sch->qstats.backlog);
 	return NET_XMIT_SUCCESS;
 }
 
@@ -518,7 +529,7 @@ static int hhf_change(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct hhf_sched_data *q = qdisc_priv(sch);
 	struct nlattr *tb[TCA_HHF_MAX + 1];
-	unsigned int qlen;
+	unsigned int qlen, prev_backlog;
 	int err;
 	u64 non_hh_quantum;
 	u32 new_quantum = q->quantum;
@@ -568,12 +579,14 @@ static int hhf_change(struct Qdisc *sch, struct nlattr *opt)
 	}
 
 	qlen = sch->q.qlen;
+	prev_backlog = sch->qstats.backlog;
 	while (sch->q.qlen > sch->limit) {
 		struct sk_buff *skb = hhf_dequeue(sch);
 
 		kfree_skb(skb);
 	}
-	qdisc_tree_decrease_qlen(sch, qlen - sch->q.qlen);
+	qdisc_tree_reduce_backlog(sch, qlen - sch->q.qlen,
+				  prev_backlog - sch->qstats.backlog);
 
 	sch_tree_unlock(sch);
 	return 0;
@@ -696,7 +709,7 @@ static struct Qdisc_ops hhf_qdisc_ops __read_mostly = {
 	.enqueue	=	hhf_enqueue,
 	.dequeue	=	hhf_dequeue,
 	.peek		=	qdisc_peek_dequeued,
-	.drop		=	hhf_drop,
+	.drop		=	hhf_qdisc_drop,
 	.init		=	hhf_init,
 	.reset		=	hhf_reset,
 	.destroy	=	hhf_destroy,

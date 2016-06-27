@@ -362,7 +362,7 @@ static int wm8994_put_drc_enum(struct snd_kcontrol *kcontrol,
 	struct wm8994 *control = wm8994->wm8994;
 	struct wm8994_pdata *pdata = &control->pdata;
 	int drc = wm8994_get_drc(kcontrol->id.name);
-	int value = ucontrol->value.integer.value[0];
+	int value = ucontrol->value.enumerated.item[0];
 
 	if (drc < 0)
 		return drc;
@@ -469,7 +469,7 @@ static int wm8994_put_retune_mobile_enum(struct snd_kcontrol *kcontrol,
 	struct wm8994 *control = wm8994->wm8994;
 	struct wm8994_pdata *pdata = &control->pdata;
 	int block = wm8994_get_retune_mobile_block(kcontrol->id.name);
-	int value = ucontrol->value.integer.value[0];
+	int value = ucontrol->value.enumerated.item[0];
 
 	if (block < 0)
 		return block;
@@ -1942,14 +1942,16 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{ "AIF2ADCDAT", NULL, "AIF2ADC Mux" },
 
 	/* AIF3 output */
-	{ "AIF3ADCDAT", "AIF1ADCDAT", "AIF1ADC1L" },
-	{ "AIF3ADCDAT", "AIF1ADCDAT", "AIF1ADC1R" },
-	{ "AIF3ADCDAT", "AIF1ADCDAT", "AIF1ADC2L" },
-	{ "AIF3ADCDAT", "AIF1ADCDAT", "AIF1ADC2R" },
-	{ "AIF3ADCDAT", "AIF2ADCDAT", "AIF2ADCL" },
-	{ "AIF3ADCDAT", "AIF2ADCDAT", "AIF2ADCR" },
-	{ "AIF3ADCDAT", "AIF2DACDAT", "AIF2DACL" },
-	{ "AIF3ADCDAT", "AIF2DACDAT", "AIF2DACR" },
+	{ "AIF3ADC Mux", "AIF1ADCDAT", "AIF1ADC1L" },
+	{ "AIF3ADC Mux", "AIF1ADCDAT", "AIF1ADC1R" },
+	{ "AIF3ADC Mux", "AIF1ADCDAT", "AIF1ADC2L" },
+	{ "AIF3ADC Mux", "AIF1ADCDAT", "AIF1ADC2R" },
+	{ "AIF3ADC Mux", "AIF2ADCDAT", "AIF2ADCL" },
+	{ "AIF3ADC Mux", "AIF2ADCDAT", "AIF2ADCR" },
+	{ "AIF3ADC Mux", "AIF2DACDAT", "AIF2DACL" },
+	{ "AIF3ADC Mux", "AIF2DACDAT", "AIF2DACR" },
+
+	{ "AIF3ADCDAT", NULL, "AIF3ADC Mux" },
 
 	/* Loopback */
 	{ "AIF1 Loopback", "ADCDAT", "AIF1ADCDAT" },

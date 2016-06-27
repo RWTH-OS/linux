@@ -16,7 +16,6 @@
 
 #include <linux/kvm_host.h>
 
-#include "opcode.h"
 #include "interrupt.h"
 
 static gpa_t kvm_trap_emul_gva_to_gpa_cb(gva_t gva)
@@ -547,7 +546,7 @@ static int kvm_trap_emul_set_one_reg(struct kvm_vcpu *vcpu,
 		kvm_mips_write_count(vcpu, v);
 		break;
 	case KVM_REG_MIPS_CP0_COMPARE:
-		kvm_mips_write_compare(vcpu, v);
+		kvm_mips_write_compare(vcpu, v, false);
 		break;
 	case KVM_REG_MIPS_CP0_CAUSE:
 		/*

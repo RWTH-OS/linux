@@ -49,12 +49,7 @@ const char *usbcore_name = "usbcore";
 
 static bool nousb;	/* Disable USB when built into kernel image */
 
-/* To disable USB, kernel command line is 'nousb' not 'usbcore.nousb' */
-#ifdef MODULE
 module_param(nousb, bool, 0444);
-#else
-core_param(nousb, nousb, bool, 0444);
-#endif
 
 /*
  * for external read access to <nousb>
@@ -510,7 +505,7 @@ struct usb_device *usb_alloc_dev(struct usb_device *parent,
 	if (root_hub)	/* Root hub always ok [and always wired] */
 		dev->authorized = 1;
 	else {
-		dev->authorized = usb_hcd->authorized_default;
+		dev->authorized = !!HCD_DEV_AUTHORIZED(usb_hcd);
 		dev->wusb = usb_bus_is_wusb(bus) ? 1 : 0;
 	}
 	return dev;

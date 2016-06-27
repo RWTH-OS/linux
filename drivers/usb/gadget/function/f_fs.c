@@ -423,7 +423,7 @@ static ssize_t __ffs_ep0_read_events(struct ffs_data *ffs, char __user *buf,
 	spin_unlock_irq(&ffs->ev.waitq.lock);
 	mutex_unlock(&ffs->mutex);
 
-	return unlikely(__copy_to_user(buf, events, size)) ? -EFAULT : size;
+	return unlikely(copy_to_user(buf, events, size)) ? -EFAULT : size;
 }
 
 static ssize_t ffs_ep0_read(struct file *file, char __user *buf,
@@ -513,7 +513,7 @@ static ssize_t ffs_ep0_read(struct file *file, char __user *buf,
 
 		/* unlocks spinlock */
 		ret = __ffs_ep0_queue_wait(ffs, data, len);
-		if (likely(ret > 0) && unlikely(__copy_to_user(buf, data, len)))
+		if (likely(ret > 0) && unlikely(copy_to_user(buf, data, len)))
 			ret = -EFAULT;
 		goto done_mutex;
 
@@ -646,24 +646,23 @@ static void ffs_user_copy_worker(struct work_struct *work)
 						   work);
 	int ret = io_data->req->status ? io_data->req->status :
 					 io_data->req->actual;
+	bool kiocb_has_eventfd = io_data->kiocb->ki_flags & IOCB_EVENTFD;
 
 	if (io_data->read && ret > 0) {
 		use_mm(io_data->mm);
 		ret = copy_to_iter(io_data->buf, ret, &io_data->data);
-		if (iov_iter_count(&io_data->data))
+		if (ret != io_data->req->actual && iov_iter_count(&io_data->data))
 			ret = -EFAULT;
 		unuse_mm(io_data->mm);
 	}
 
 	io_data->kiocb->ki_complete(io_data->kiocb, ret, ret);
 
-	if (io_data->ffs->ffs_eventfd &&
-	    !(io_data->kiocb->ki_flags & IOCB_EVENTFD))
+	if (io_data->ffs->ffs_eventfd && !kiocb_has_eventfd)
 		eventfd_signal(io_data->ffs->ffs_eventfd, 1);
 
 	usb_ep_free_request(io_data->ep, io_data->req);
 
-	io_data->kiocb->private = NULL;
 	if (io_data->read)
 		kfree(io_data->to_free);
 	kfree(io_data->buf);
@@ -2897,11 +2896,17 @@ static int ffs_func_bind(struct usb_configuration *c,
 			 struct usb_function *f)
 {
 	struct f_fs_opts *ffs_opts = ffs_do_functionfs_bind(f, c);
+	struct ffs_function *func = ffs_func_from_usb(f);
+	int ret;
 
 	if (IS_ERR(ffs_opts))
 		return PTR_ERR(ffs_opts);
 
-	return _ffs_func_bind(c, f);
+	ret = _ffs_func_bind(c, f);
+	if (ret && !--ffs_opts->refcnt)
+		functionfs_unbind(func->ffs);
+
+	return ret;
 }
 
 
@@ -3487,7 +3492,7 @@ static char *ffs_prepare_buffer(const char __user *buf, size_t len)
 	if (unlikely(!data))
 		return ERR_PTR(-ENOMEM);
 
-	if (unlikely(__copy_from_user(data, buf, len))) {
+	if (unlikely(copy_from_user(data, buf, len))) {
 		kfree(data);
 		return ERR_PTR(-EFAULT);
 	}

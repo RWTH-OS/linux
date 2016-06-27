@@ -811,14 +811,11 @@ repoll:
 			wc->opcode    = IB_WC_MASKED_FETCH_ADD;
 			wc->byte_len  = 8;
 			break;
-		case MLX4_OPCODE_BIND_MW:
-			wc->opcode    = IB_WC_BIND_MW;
-			break;
 		case MLX4_OPCODE_LSO:
 			wc->opcode    = IB_WC_LSO;
 			break;
 		case MLX4_OPCODE_FMR:
-			wc->opcode    = IB_WC_FAST_REG_MR;
+			wc->opcode    = IB_WC_REG_MR;
 			break;
 		case MLX4_OPCODE_LOCAL_INVAL:
 			wc->opcode    = IB_WC_LOCAL_INV;
@@ -871,7 +868,7 @@ repoll:
 		if (is_eth) {
 			wc->sl  = be16_to_cpu(cqe->sl_vid) >> 13;
 			if (be32_to_cpu(cqe->vlan_my_qpn) &
-					MLX4_CQE_VLAN_PRESENT_MASK) {
+					MLX4_CQE_CVLAN_PRESENT_MASK) {
 				wc->vlan_id = be16_to_cpu(cqe->sl_vid) &
 					MLX4_CQE_VID_MASK;
 			} else {

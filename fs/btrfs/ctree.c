@@ -19,6 +19,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/rbtree.h>
+#include <linux/vmalloc.h>
 #include "ctree.h"
 #include "disk-io.h"
 #include "transaction.h"
@@ -1011,7 +1012,7 @@ static noinline int update_ref_for_cow(struct btrfs_trans_handle *trans,
 			return ret;
 		if (refs == 0) {
 			ret = -EROFS;
-			btrfs_std_error(root->fs_info, ret);
+			btrfs_std_error(root->fs_info, ret, NULL);
 			return ret;
 		}
 	} else {
@@ -1159,8 +1160,10 @@ static noinline int __btrfs_cow_block(struct btrfs_trans_handle *trans,
 
 	if (test_bit(BTRFS_ROOT_REF_COWS, &root->state)) {
 		ret = btrfs_reloc_cow_block(trans, root, buf, cow);
-		if (ret)
+		if (ret) {
+			btrfs_abort_transaction(trans, root, ret);
 			return ret;
+		}
 	}
 
 	if (buf == root->node) {
@@ -1553,7 +1556,7 @@ noinline int btrfs_cow_block(struct btrfs_trans_handle *trans,
 		return 0;
 	}
 
-	search_start = buf->start & ~((u64)(1024 * 1024 * 1024) - 1);
+	search_start = buf->start & ~((u64)SZ_1G - 1);
 
 	if (parent)
 		btrfs_set_lock_blocking(parent);
@@ -1925,7 +1928,7 @@ static noinline int balance_level(struct btrfs_trans_handle *trans,
 		child = read_node_slot(root, mid, 0);
 		if (!child) {
 			ret = -EROFS;
-			btrfs_std_error(root->fs_info, ret);
+			btrfs_std_error(root->fs_info, ret, NULL);
 			goto enospc;
 		}
 
@@ -2028,7 +2031,7 @@ static noinline int balance_level(struct btrfs_trans_handle *trans,
 		 */
 		if (!left) {
 			ret = -EROFS;
-			btrfs_std_error(root->fs_info, ret);
+			btrfs_std_error(root->fs_info, ret, NULL);
 			goto enospc;
 		}
 		wret = balance_node_right(trans, root, mid, left);
@@ -2246,7 +2249,6 @@ static void reada_for_search(struct btrfs_root *root,
 	u64 target;
 	u64 nread = 0;
 	u64 gen;
-	int direction = path->reada;
 	struct extent_buffer *eb;
 	u32 nr;
 	u32 blocksize;
@@ -2274,16 +2276,16 @@ static void reada_for_search(struct btrfs_root *root,
 	nr = slot;
 
 	while (1) {
-		if (direction < 0) {
+		if (path->reada == READA_BACK) {
 			if (nr == 0)
 				break;
 			nr--;
-		} else if (direction > 0) {
+		} else if (path->reada == READA_FORWARD) {
 			nr++;
 			if (nr >= nritems)
 				break;
 		}
-		if (path->reada < 0 && objectid) {
+		if (path->reada == READA_BACK && objectid) {
 			btrfs_node_key(node, &disk_key, nr);
 			if (btrfs_disk_key_objectid(&disk_key) != objectid)
 				break;
@@ -2491,7 +2493,7 @@ read_block_for_search(struct btrfs_trans_handle *trans,
 	btrfs_set_path_blocking(p);
 
 	free_extent_buffer(tmp);
-	if (p->reada)
+	if (p->reada != READA_NONE)
 		reada_for_search(root, p, level, slot, key->objectid);
 
 	btrfs_release_path(p);
@@ -4938,8 +4940,8 @@ int btrfs_del_items(struct btrfs_trans_handle *trans, struct btrfs_root *root,
 {
 	struct extent_buffer *leaf;
 	struct btrfs_item *item;
-	int last_off;
-	int dsize = 0;
+	u32 last_off;
+	u32 dsize = 0;
 	int ret = 0;
 	int wret;
 	int i;
@@ -5360,10 +5362,13 @@ int btrfs_compare_trees(struct btrfs_root *left_root,
 		goto out;
 	}
 
-	tmp_buf = kmalloc(left_root->nodesize, GFP_NOFS);
+	tmp_buf = kmalloc(left_root->nodesize, GFP_KERNEL | __GFP_NOWARN);
 	if (!tmp_buf) {
-		ret = -ENOMEM;
-		goto out;
+		tmp_buf = vmalloc(left_root->nodesize);
+		if (!tmp_buf) {
+			ret = -ENOMEM;
+			goto out;
+		}
 	}
 
 	left_path->search_commit_root = 1;
@@ -5564,7 +5569,7 @@ int btrfs_compare_trees(struct btrfs_root *left_root,
 out:
 	btrfs_free_path(left_path);
 	btrfs_free_path(right_path);
-	kfree(tmp_buf);
+	kvfree(tmp_buf);
 	return ret;
 }
 

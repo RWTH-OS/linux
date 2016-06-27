@@ -2045,7 +2045,9 @@ static void gsm_cleanup_mux(struct gsm_mux *gsm)
 		}
 	}
 	spin_unlock(&gsm_mux_lock);
-	WARN_ON(i == MAX_MUX);
+	/* open failed before registering => nothing to do */
+	if (i == MAX_MUX)
+		return;
 
 	/* In theory disconnecting DLCI 0 is sufficient but for some
 	   modems this is apparently not the case. */
@@ -2712,7 +2714,7 @@ static void gsm_mux_rx_netchar(struct gsm_dlci *dlci,
 	memcpy(skb_put(skb, size), in_buf, size);
 
 	skb->dev = net;
-	skb->protocol = __constant_htons(ETH_P_IP);
+	skb->protocol = htons(ETH_P_IP);
 
 	/* Ship it off to the kernel */
 	netif_rx(skb);

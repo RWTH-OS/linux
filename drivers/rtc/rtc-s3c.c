@@ -302,6 +302,7 @@ static int s3c_rtc_setalarm(struct device *dev, struct rtc_wkalrm *alrm)
 	struct s3c_rtc *info = dev_get_drvdata(dev);
 	struct rtc_time *tm = &alrm->time;
 	unsigned int alrm_en;
+	int year = tm->tm_year - 100;
 
 	dev_dbg(dev, "s3c_rtc_setalarm: %d, %04d.%02d.%02d %02d:%02d:%02d\n",
 		 alrm->enabled,
@@ -326,6 +327,21 @@ static int s3c_rtc_setalarm(struct device *dev, struct rtc_wkalrm *alrm)
 	if (tm->tm_hour < 24 && tm->tm_hour >= 0) {
 		alrm_en |= S3C2410_RTCALM_HOUREN;
 		writeb(bin2bcd(tm->tm_hour), info->base + S3C2410_ALMHOUR);
+	}
+
+	if (year < 100 && year >= 0) {
+		alrm_en |= S3C2410_RTCALM_YEAREN;
+		writeb(bin2bcd(year), info->base + S3C2410_ALMYEAR);
+	}
+
+	if (tm->tm_mon < 12 && tm->tm_mon >= 0) {
+		alrm_en |= S3C2410_RTCALM_MONEN;
+		writeb(bin2bcd(tm->tm_mon + 1), info->base + S3C2410_ALMMON);
+	}
+
+	if (tm->tm_mday <= 31 && tm->tm_mday >= 1) {
+		alrm_en |= S3C2410_RTCALM_DAYEN;
+		writeb(bin2bcd(tm->tm_mday), info->base + S3C2410_ALMDATE);
 	}
 
 	dev_dbg(dev, "setting S3C2410_RTCALM to %08x\n", alrm_en);
@@ -422,8 +438,9 @@ static int s3c_rtc_remove(struct platform_device *pdev)
 
 	s3c_rtc_setaie(info->dev, 0);
 
+	if (info->data->needs_src_clk)
+		clk_unprepare(info->rtc_src_clk);
 	clk_unprepare(info->rtc_clk);
-	info->rtc_clk = NULL;
 
 	return 0;
 }
@@ -494,6 +511,7 @@ static int s3c_rtc_probe(struct platform_device *pdev)
 		if (IS_ERR(info->rtc_src_clk)) {
 			dev_err(&pdev->dev,
 				"failed to find rtc source clock\n");
+			clk_disable_unprepare(info->rtc_clk);
 			return PTR_ERR(info->rtc_src_clk);
 		}
 		clk_prepare_enable(info->rtc_src_clk);

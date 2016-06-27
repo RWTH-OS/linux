@@ -144,7 +144,7 @@ static int hym8563_rtc_set_time(struct device *dev, struct rtc_time *tm)
 	 * it does not seem to carry it over a subsequent write/read.
 	 * So we'll limit ourself to 100 years, starting at 2000 for now.
 	 */
-	buf[6] = tm->tm_year - 100;
+	buf[6] = bin2bcd(tm->tm_year - 100);
 
 	/*
 	 * CTL1 only contains TEST-mode bits apart from stop,
@@ -599,7 +599,6 @@ MODULE_DEVICE_TABLE(of, hym8563_dt_idtable);
 static struct i2c_driver hym8563_driver = {
 	.driver		= {
 		.name	= "rtc-hym8563",
-		.owner	= THIS_MODULE,
 		.pm	= &hym8563_pm_ops,
 		.of_match_table	= hym8563_dt_idtable,
 	},

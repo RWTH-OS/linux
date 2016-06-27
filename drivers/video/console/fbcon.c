@@ -709,6 +709,7 @@ static int con2fb_acquire_newinfo(struct vc_data *vc, struct fb_info *info,
 	}
 
 	if (!err) {
+		ops->cur_blink_jiffies = HZ / 5;
 		info->fbcon_par = ops;
 
 		if (vc)
@@ -956,6 +957,7 @@ static const char *fbcon_startup(void)
 	ops->currcon = -1;
 	ops->graphics = 1;
 	ops->cur_rotate = -1;
+	ops->cur_blink_jiffies = HZ / 5;
 	info->fbcon_par = ops;
 	p->con_rotate = initial_rotation;
 	set_blitting_type(vc, info);
@@ -1093,6 +1095,7 @@ static void fbcon_init(struct vc_data *vc, int init)
 		con_copy_unimap(vc, svc);
 
 	ops = info->fbcon_par;
+	ops->cur_blink_jiffies = msecs_to_jiffies(vc->vc_cur_blink_ms);
 	p->con_rotate = initial_rotation;
 	set_blitting_type(vc, info);
 

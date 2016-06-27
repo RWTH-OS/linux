@@ -19,7 +19,6 @@
 #include <linux/sched.h>
 #include <net/nfc/nci_core.h>
 
-#include "ndlc.h"
 #include "st-nci.h"
 
 #define NDLC_TIMER_T1		100
@@ -194,7 +193,6 @@ static void llt_ndlc_rcv_queue(struct llt_ndlc *ndlc)
 					  msecs_to_jiffies(NDLC_TIMER_T1_WAIT));
 				break;
 			default:
-				pr_err("UNKNOWN Packet Control Byte=%d\n", pcb);
 				kfree_skb(skb);
 				break;
 			}
@@ -267,7 +265,8 @@ static void ndlc_t2_timeout(unsigned long data)
 }
 
 int ndlc_probe(void *phy_id, struct nfc_phy_ops *phy_ops, struct device *dev,
-	       int phy_headroom, int phy_tailroom, struct llt_ndlc **ndlc_id)
+	       int phy_headroom, int phy_tailroom, struct llt_ndlc **ndlc_id,
+	       struct st_nci_se_status *se_status)
 {
 	struct llt_ndlc *ndlc;
 
@@ -297,7 +296,7 @@ int ndlc_probe(void *phy_id, struct nfc_phy_ops *phy_ops, struct device *dev,
 
 	INIT_WORK(&ndlc->sm_work, llt_ndlc_sm_work);
 
-	return st_nci_probe(ndlc, phy_headroom, phy_tailroom);
+	return st_nci_probe(ndlc, phy_headroom, phy_tailroom, se_status);
 }
 EXPORT_SYMBOL(ndlc_probe);
 

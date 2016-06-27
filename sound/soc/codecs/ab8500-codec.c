@@ -1130,7 +1130,7 @@ static int sid_status_control_get(struct snd_kcontrol *kcontrol,
 	struct ab8500_codec_drvdata *drvdata = dev_get_drvdata(codec->dev);
 
 	mutex_lock(&drvdata->ctrl_lock);
-	ucontrol->value.integer.value[0] = drvdata->sid_status;
+	ucontrol->value.enumerated.item[0] = drvdata->sid_status;
 	mutex_unlock(&drvdata->ctrl_lock);
 
 	return 0;
@@ -1147,7 +1147,7 @@ static int sid_status_control_put(struct snd_kcontrol *kcontrol,
 
 	dev_dbg(codec->dev, "%s: Enter\n", __func__);
 
-	if (ucontrol->value.integer.value[0] != SID_APPLY_FIR) {
+	if (ucontrol->value.enumerated.item[0] != SID_APPLY_FIR) {
 		dev_err(codec->dev,
 			"%s: ERROR: This control supports '%s' only!\n",
 			__func__, enum_sid_state[SID_APPLY_FIR]);
@@ -1199,7 +1199,7 @@ static int anc_status_control_get(struct snd_kcontrol *kcontrol,
 	struct ab8500_codec_drvdata *drvdata = dev_get_drvdata(codec->dev);
 
 	mutex_lock(&drvdata->ctrl_lock);
-	ucontrol->value.integer.value[0] = drvdata->anc_status;
+	ucontrol->value.enumerated.item[0] = drvdata->anc_status;
 	mutex_unlock(&drvdata->ctrl_lock);
 
 	return 0;
@@ -1220,7 +1220,7 @@ static int anc_status_control_put(struct snd_kcontrol *kcontrol,
 
 	mutex_lock(&drvdata->ctrl_lock);
 
-	req = ucontrol->value.integer.value[0];
+	req = ucontrol->value.enumerated.item[0];
 	if (req >= ARRAY_SIZE(enum_anc_state)) {
 		status = -EINVAL;
 		goto cleanup;
@@ -1335,11 +1335,10 @@ static DECLARE_TLV_DB_SCALE(dax_dig_gain_tlv, -6300, 100, 1);
 static DECLARE_TLV_DB_SCALE(hs_ear_dig_gain_tlv, -100, 100, 1);
 /* -1dB = Mute */
 
-static const unsigned int hs_gain_tlv[] = {
-	TLV_DB_RANGE_HEAD(2),
+static const DECLARE_TLV_DB_RANGE(hs_gain_tlv,
 	0, 3, TLV_DB_SCALE_ITEM(-3200, 400, 0),
-	4, 15, TLV_DB_SCALE_ITEM(-1800, 200, 0),
-};
+	4, 15, TLV_DB_SCALE_ITEM(-1800, 200, 0)
+);
 
 static DECLARE_TLV_DB_SCALE(mic_gain_tlv, 0, 100, 0);
 

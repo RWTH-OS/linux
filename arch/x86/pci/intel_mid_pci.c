@@ -213,13 +213,14 @@ static int intel_mid_pci_irq_enable(struct pci_dev *dev)
 {
 	struct irq_alloc_info info;
 	int polarity;
+	int ret;
 
 	if (dev->irq_managed && dev->irq > 0)
 		return 0;
 
 	switch (intel_mid_identify_cpu()) {
 	case INTEL_MID_CPU_CHIP_TANGIER:
-		polarity = 0; /* active high */
+		polarity = IOAPIC_POL_HIGH;
 
 		/* Special treatment for IRQ0 */
 		if (dev->irq == 0) {
@@ -234,7 +235,7 @@ static int intel_mid_pci_irq_enable(struct pci_dev *dev)
 		}
 		break;
 	default:
-		polarity = 1; /* active low */
+		polarity = IOAPIC_POL_LOW;
 		break;
 	}
 
@@ -244,8 +245,9 @@ static int intel_mid_pci_irq_enable(struct pci_dev *dev)
 	 * MRST only have IOAPIC, the PCI irq lines are 1:1 mapped to
 	 * IOAPIC RTE entries, so we just enable RTE for the device.
 	 */
-	if (mp_map_gsi_to_irq(dev->irq, IOAPIC_MAP_ALLOC, &info) < 0)
-		return -EBUSY;
+	ret = mp_map_gsi_to_irq(dev->irq, IOAPIC_MAP_ALLOC, &info);
+	if (ret < 0)
+		return ret;
 
 	dev->irq_managed = 1;
 
@@ -261,7 +263,7 @@ static void intel_mid_pci_irq_disable(struct pci_dev *dev)
 	}
 }
 
-struct pci_ops intel_mid_pci_ops = {
+static struct pci_ops intel_mid_pci_ops = {
 	.read = pci_read,
 	.write = pci_write,
 };
