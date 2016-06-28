@@ -89,7 +89,7 @@ GDT64:                           ; Global Descriptor Table (64-bit).
     dw 0                         ; Limit (low).
     dw 0                         ; Base (low).
     db 0                         ; Base (middle)
-    db 10011000b                 ; Access.
+    db 10011010b                 ; Access.
     db 00100000b                 ; Granularity.
     db 0                         ; Base (high).
     .Data: equ $ - GDT64         ; The data descriptor.
@@ -203,7 +203,6 @@ cpu_init:
     mov eax, cr4
     and eax, 0xfffbf9ff     ; disable SSE
     or eax, (1 << 7)        ; enable PGE
-    or eax, (1 << 20)       ; enable SMEP
     mov cr4, eax
 
     ; Set CR0 (PM-bit is already set)
@@ -217,6 +216,11 @@ cpu_init:
     mov cr0, eax
 
     lgdt [GDTR64]           ; Load the 64-bit global descriptor table.
+    mov ax, GDT64.Data
+    mov ss, ax
+    mov ds, ax
+    mov es, ax
+
     jmp GDT64.Code:start64  ; Set the code segment and enter 64-bit long mode.
 
 [BITS 64]
