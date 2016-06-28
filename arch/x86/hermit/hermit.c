@@ -87,6 +87,7 @@ unsigned int isle_counter = 0;
 extern uint8_t* hermit_trampoline;
 
 extern int mmnif_set_carrier(bool new_carrier);
+extern int wakeup_secondary_cpu_via_init(int phys_apicid, unsigned long start_eip);
 
 void hermit_get_mmnif_data(struct mmnif_private* priv)
 {
@@ -234,6 +235,7 @@ found:
  */
 static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 {
+	unsigned long flags;
 	unsigned int start_eip;
 	int apicid = apic->cpu_present_to_apicid(cpu);
 
@@ -269,8 +271,8 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 	*((uint64_t*) (hermit_trampoline+0x5A)) += (uint64_t) start_eip;
 	*((uint32_t*) (hermit_trampoline+0xCE)) += (uint32_t) (virt_to_phys(hermit_base[isle]) & 0xFFFFFFFF);
 	*((uint32_t*) (hermit_trampoline+0xDD)) += (uint32_t) (virt_to_phys(hermit_base[isle]) >> 32);
-	*((uint32_t*) (hermit_trampoline+0x188)) += start_eip;
-	*((uint32_t*) (hermit_trampoline+0x18D)) += start_eip;
+	*((uint32_t*) (hermit_trampoline+0x183)) += start_eip;
+	*((uint32_t*) (hermit_trampoline+0x192)) += start_eip;
 
 	if (!cpu_counter) {
 		ssize_t sz;
@@ -306,6 +308,15 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 
 	*((uint32_t*) (hermit_base[isle] + 0x30)) = apicid;
 
+#if 1
+	// reuse wakeup code from Linux
+	local_irq_save(flags);
+	wakeup_secondary_cpu_via_init(apicid, start_eip);
+	local_irq_restore(flags);
+
+	cpu_counter++;
+	while(*((volatile uint32_t*) (hermit_base[isle] + 0x20)) < cpu_counter) { cpu_relax(); }
+#else
 	smpboot_setup_warm_reset_vector(start_eip);
 	smp_mb();
 
@@ -328,6 +339,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 	while(*((volatile uint32_t*) (hermit_base[isle] + 0x20)) < cpu_counter) { cpu_relax(); }
 
 	smpboot_restore_warm_reset_vector();
+#endif
 
 	return 0;
 }
