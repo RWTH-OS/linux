@@ -152,6 +152,7 @@ static size_t mmnif_rxbuff_alloc(struct mmnif_private *priv, uint8_t dest, uint1
 			}
 		}
 	}
+	mb();
 	islelock_unlock(priv->isle_locks + dest);
 
 	return ret;
@@ -165,6 +166,9 @@ static int mmnif_commit_packet(struct mmnif_private *priv, uint8_t dest, size_t 
 {
 	volatile mm_rx_buffer_t *rb = (mm_rx_buffer_t *) ((char *)priv->header_start_address + dest * priv->header_size);
 	uint32_t i;
+
+	// be sure that the packet has been written
+	mb();
 
 	for(i=0; i < MMNIF_MAX_DESCRIPTORS; i++)
 	{
@@ -309,10 +313,16 @@ static const struct net_device_ops mmnif_ops __read_mostly = {
  */
 static void mmnif_rxbuff_free(struct mmnif_private *priv)
 {
+	unsigned long flags;
+
 	volatile mm_rx_buffer_t *b = priv->rx_buff;
 	uint32_t i, j;
 	uint32_t rpos;
 
+	// be sure that we receive all data
+	mb();
+
+	local_irq_save(flags);
 	islelock_lock(priv->isle_locks + 0);
 	rpos = b->dread;
 
@@ -340,7 +350,9 @@ static void mmnif_rxbuff_free(struct mmnif_private *priv)
 			break;
 	}
 
+	mb();
 	islelock_unlock(priv->isle_locks + 0);
+	local_irq_restore(flags);
 }
 
 /*
@@ -348,6 +360,7 @@ static void mmnif_rxbuff_free(struct mmnif_private *priv)
  */
 static int mmnif_rx(struct net_device *dev, struct mmnif_private *priv)
 {
+	unsigned long flags;
 	volatile mm_rx_buffer_t *b = priv->rx_buff;
 	int npackets = 0;
 	uint16_t length = 0;
@@ -357,12 +370,14 @@ static int mmnif_rx(struct net_device *dev, struct mmnif_private *priv)
 	struct sk_buff *skb;
 
 anotherpacket:
+	local_irq_save(flags);
 	rdesc = 0xFF;
 
 	/* check if this call to mmnif_rx makes any sense
 	 */
 	if (b->desc_table[b->dread].stat == MMNIF_STATUS_FREE)
 	{
+		local_irq_restore(flags);
 		goto out;
 	}
 
@@ -381,9 +396,12 @@ anotherpacket:
 
 		if (b->desc_table[(j + i) % MMNIF_MAX_DESCRIPTORS].stat == MMNIF_STATUS_FREE)
 		{
+			local_irq_restore(flags);
 			return npackets;
 		}
 	}
+
+	local_irq_restore(flags);
 
 	/* if there is no packet finished we encountered a random error
 	 */
@@ -426,13 +444,11 @@ anotherpacket:
 	}
 
 	skb_reserve(skb, 2); /* align IP on 16B boundary */
+	memcpy(skb_put(skb, length), packet, length); /* copy packet to sk_buff structure */
 	skb->dev = dev;
 	dev->header_ops->create(skb, dev, ETH_P_IP /*ETH_P_802_3*/, NULL, NULL, length+ETH_HLEN);
 	skb->protocol = eth_type_trans(skb, dev);
 	skb->ip_summed = CHECKSUM_UNNECESSARY; //CHECKSUM_COMPLETE;
-
-	/* copy packet to sk_buff structure */
-	memcpy(skb_put(skb, length), packet, length);
 
 	/* indicate that the copy process is done and the packet can be freed
 	 * note that we did not lock here because we are the only one editing this value
@@ -454,12 +470,17 @@ anotherpacket:
 	}
 #endif
 
-	if (likely(netif_rx(skb) == NET_RX_SUCCESS)) {
+	if (unlikely(netif_rx(skb) == NET_RX_DROP)) {
+		/* Maintain stats */
+		npackets++;
+		priv->stats.rx_dropped++;
+		pr_notice("nnnif_rx(): receive corrupt message\n");
+	} else {
 	        /* Maintain stats */
 		npackets++;
 		priv->stats.rx_packets++;
 		priv->stats.rx_bytes += length;
-	}
+	 }
 
 	goto anotherpacket;
 
