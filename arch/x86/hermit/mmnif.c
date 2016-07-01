@@ -164,6 +164,7 @@ static size_t mmnif_rxbuff_alloc(struct mmnif_private *priv, uint8_t dest, uint1
  */
 static int mmnif_commit_packet(struct mmnif_private *priv, uint8_t dest, size_t addr)
 {
+	size_t phyaddr = virt_to_phys((void*)addr);
 	volatile mm_rx_buffer_t *rb = (mm_rx_buffer_t *) ((char *)priv->header_start_address + dest * priv->header_size);
 	uint32_t i;
 
@@ -172,7 +173,7 @@ static int mmnif_commit_packet(struct mmnif_private *priv, uint8_t dest, size_t 
 
 	for(i=0; i < MMNIF_MAX_DESCRIPTORS; i++)
 	{
-		if ((rb->desc_table[i].addr == virt_to_phys((void*)addr))
+		if ((rb->desc_table[i].addr == phyaddr)
 		 && (rb->desc_table[i].stat == MMNIF_STATUS_PENDING))
 		{
 			rb->desc_table[i].stat = MMNIF_STATUS_RDY;
