@@ -54,7 +54,6 @@
 #include <linux/init.h>
 #include <linux/err.h>
 #include <linux/mm.h>
-#include <linux/spinlock.h>
 #include <linux/interrupt.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -191,11 +190,8 @@ static netdev_tx_t mmnif_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct iphdr* iph = ip_hdr(skb);
 	size_t write_address;
 	uint8_t dest_ip = (iph->daddr >> 24);
-	unsigned long flags;
 
  	//pr_notice("mmnif_xmit: data %p, len %d, dest address %pI4, dest_ip %d\n", skb->data, skb->len-ETH_HLEN, &iph->daddr, (int)dest_ip);
-
-	spin_lock_irqsave(&priv->lock, flags);
 
 	/* allocate memory for the packet in the remote buffer */
 realloc:
@@ -206,7 +202,6 @@ realloc:
 
 		cpu_relax();
 		goto realloc;
-		//spin_unlock_irqrestore(&priv->lock, flags);
 		//return NETDEV_TX_BUSY;
 	}
 	dev->trans_start = jiffies; /* save the timestamp */
@@ -230,8 +225,6 @@ realloc:
 
 	priv->stats.tx_packets++;
 	priv->stats.tx_bytes += skb->len-ETH_HLEN;
-
-	spin_unlock_irqrestore(&priv->lock, flags);
 
 	hermit_trigger_irq(dest_ip-1);
 
@@ -559,9 +552,7 @@ static int mmnif_thread(void* data)
 		if (!mmnif_dev)
 			break;
 
-		spin_lock(&priv->lock);
 		mmnif_rx(mmnif_dev, priv);
-		spin_unlock(&priv->lock);
 	}
 
 	return 0;
@@ -611,7 +602,6 @@ static int __init mmnif_init(void)
 
 	priv = netdev_priv(dev);
 	memset(priv, 0, sizeof(struct mmnif_private));
-	spin_lock_init(&priv->lock);
 	priv->dev = dev;
 	hermit_get_mmnif_data(priv);
 	priv->kthr = kthread_run(mmnif_thread, NULL, "mmnif");

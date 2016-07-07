@@ -33,7 +33,6 @@
 #define __HERMIT_H__
 
 #include <linux/netdevice.h>
-#include <linux/spinlock.h>
 
 /*  define constants
  *  regarding the driver & its configuration
@@ -105,7 +104,6 @@ struct mmnif_private {
 
         struct net_device_stats stats;
         struct net_device *dev;
-        spinlock_t lock;
 	struct task_struct* kthr;
 };
 
