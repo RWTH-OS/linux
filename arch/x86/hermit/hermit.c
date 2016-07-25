@@ -304,6 +304,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		*((uint64_t*) (hermit_base[isle] + 0x6c)) = (uint64_t) header_phy_start_address;
 		if (x2apic_enabled())
 			*((uint32_t*) (hermit_base[isle] + 0x74)) = 0;
+		 *((uint32_t*) (hermit_base[isle] + 0x78)) = 0;
 	}
 
 	*((uint32_t*) (hermit_base[isle] + 0x30)) = apicid;
