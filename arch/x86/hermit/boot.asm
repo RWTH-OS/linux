@@ -226,6 +226,9 @@ cpu_init:
 [BITS 64]
 ALIGN 8
 start64:
+    ; on other systens the pointer to multiboot info is stored in rdx
+    ; => set to zero to guarantee that the pointer is invalid
+    mov rdx, 0
     push kernel_start
     ret
 
