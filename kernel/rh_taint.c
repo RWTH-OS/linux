@@ -8,7 +8,7 @@
 void mark_hardware_unsupported(const char *msg)
 {
 	/* Print one single message */
-	pr_crit("Warning: %s - this hardware has not undergone testing by Red Hat and might not be certified. Please consult https://hardware.redhat.com for certified hardware.\n", msg);
+	pr_crit("Warning: %s - this hardware has not undergone upstream testing. Please consult http://wiki.centos.org/FAQ for more information\n", msg);
 }
 EXPORT_SYMBOL(mark_hardware_unsupported);
 
