@@ -12,6 +12,9 @@ typedef struct {
 	unsigned int irq_spurious_count;
 	unsigned int icr_read_retry_count;
 #endif
+#ifdef CONFIG_HERMIT_CORE
+	unsigned int irq_mmnif_count;
+#endif
 #ifdef CONFIG_HAVE_KVM
 	unsigned int kvm_posted_intr_ipis;
 #endif

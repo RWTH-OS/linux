@@ -96,6 +96,9 @@
 #define THERMAL_APIC_VECTOR		0xfa
 #define THRESHOLD_APIC_VECTOR		0xf9
 #define REBOOT_VECTOR			0xf8
+#ifdef CONFIG_HERMIT_CORE
+#define MMNIF_VECTOR			0x7a
+#endif
 
 /*
  * Generic system vector for platform specific use

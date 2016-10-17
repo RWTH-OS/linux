@@ -354,6 +354,7 @@ typedef struct elf64_shdr {
 
 #define ELFOSABI_NONE	0
 #define ELFOSABI_LINUX	3
+#define ELFOSABI_HERMIT 0x42
 
 #ifndef ELF_OSABI
 #define ELF_OSABI ELFOSABI_NONE

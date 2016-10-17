@@ -181,6 +181,10 @@ static void __init apic_intr_init(void)
 # endif
 
 #endif
+
+#ifdef CONFIG_HERMIT_CORE
+	alloc_intr_gate(MMNIF_VECTOR, mmnif_interrupt);
+#endif
 }
 
 void __init native_init_IRQ(void)

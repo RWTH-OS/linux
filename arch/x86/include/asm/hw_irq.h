@@ -31,6 +31,7 @@ extern void x86_platform_ipi(void);
 extern void kvm_posted_intr_ipi(void);
 extern void error_interrupt(void);
 extern void irq_work_interrupt(void);
+extern void mmnif_interrupt(void);
 
 extern void spurious_interrupt(void);
 extern void thermal_interrupt(void);
@@ -83,6 +84,7 @@ extern void trace_apic_timer_interrupt(void);
 extern void trace_x86_platform_ipi(void);
 extern void trace_error_interrupt(void);
 extern void trace_irq_work_interrupt(void);
+extern void trace_mmnif_interrupt(void);
 extern void trace_spurious_interrupt(void);
 extern void trace_thermal_interrupt(void);
 extern void trace_reschedule_interrupt(void);

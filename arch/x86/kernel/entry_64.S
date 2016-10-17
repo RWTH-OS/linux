@@ -981,6 +981,11 @@ apicinterrupt LOCAL_TIMER_VECTOR \
 apicinterrupt X86_PLATFORM_IPI_VECTOR \
 	x86_platform_ipi smp_x86_platform_ipi
 
+#ifdef CONFIG_HERMIT_CORE
+apicinterrupt MMNIF_VECTOR \
+	mmnif_interrupt smp_mmnif_interrupt
+#endif
+
 #ifdef CONFIG_HAVE_KVM
 apicinterrupt3 POSTED_INTR_VECTOR \
 	kvm_posted_intr_ipi smp_kvm_posted_intr_ipi

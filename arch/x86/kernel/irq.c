@@ -83,6 +83,12 @@ int arch_show_interrupts(struct seq_file *p, int prec)
 		seq_printf(p, "%10u ", irq_stats(j)->icr_read_retry_count);
 	seq_printf(p, "  APIC ICR read retries\n");
 #endif
+#ifdef CONFIG_HERMIT_CORE
+	seq_printf(p, "%*s: ", prec, "MMN");
+	for_each_online_cpu(j)
+		seq_printf(p, "%10u ", irq_stats(j)->irq_mmnif_count);
+	seq_puts(p, "  Memory Mapped Network Interface\n");
+#endif
 	if (x86_platform_ipi_callback) {
 		seq_printf(p, "%*s: ", prec, "PLT");
 		for_each_online_cpu(j)

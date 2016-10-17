@@ -1,0 +1,11 @@
+config HERMIT_CORE
+	bool "HermitCore support"
+	depends on X86_64 && SMP && HOTPLUG_CPU 
+	select SYSFS
+	---help---
+	  HermitCore is a novel unikernel operating system targeting a scalable
+	  and predictable runtime behavior for HPC and cloud environments.
+	  It can be used as classical unikernel within a virtual machine. In
+	  addition, it extends the multi-kernel approach and combines it with
+	  unikernel features. As multi-kernel, cores could be isolated from Linux
+	  and use these cores for bare-metal computation.

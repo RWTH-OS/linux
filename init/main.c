@@ -879,9 +879,15 @@ static int run_init_process(const char *init_filename)
 }
 
 static noinline void __init kernel_init_freeable(void);
+int hermit_init(void);
 
 static int __ref kernel_init(void *unused)
 {
+#ifdef CONFIG_HERMIT_CORE
+	/* initialize HermitCore */
+	hermit_init();
+#endif
+
 	kernel_init_freeable();
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
