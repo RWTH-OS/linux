@@ -62,8 +62,9 @@
 #include <linux/ip.h>
 #include <linux/semaphore.h>
 #include <linux/kthread.h>
-#include <asm/trace/irq_vectors.h>
 #include <asm/atomic.h>
+#include <asm/hw_irq.h>
+#include <asm/trace/irq_vectors.h>
 
 #include "hermit.h"
 
@@ -507,29 +508,30 @@ static inline void __mmnif_interrupt(struct pt_regs *regs)
 
 __visible void smp_mmnif_interrupt(struct pt_regs *regs)
 {
-	//ipi_entering_ack_irq();
-	ack_APIC_irq();
-	irq_enter();
+	struct pt_regs *old_regs = set_irq_regs(regs);
+
+	entering_ack_irq();
 	inc_irq_stat(irq_mmnif_count);
 
 	__mmnif_interrupt(regs);
 
-	irq_exit();
+	exiting_irq();
+	set_irq_regs(old_regs);
 }
 
-// currently, we didn't support tracing
 __visible void smp_trace_mmnif_interrupt(struct pt_regs *regs)
 {
-	//ipi_entering_ack_irq();
-	ack_APIC_irq();
-	irq_enter();
+	struct pt_regs *old_regs = set_irq_regs(regs);
+
+	entering_ack_irq();
 	inc_irq_stat(irq_mmnif_count);
-	//trace_mmnif_entry(MMNIF_VECTOR);
+	trace_mmnif_interrupt_entry(MMNIF_VECTOR);
 
 	__mmnif_interrupt(regs);
 
-	//trace_mmnif_exit(MMNIF_VECTOR);
-	irq_exit();
+	trace_mmnif_interrupt_exit(MMNIF_VECTOR);
+	exiting_irq();
+	set_irq_regs(old_regs);
 }
 
 static int mmnif_thread(void* data)

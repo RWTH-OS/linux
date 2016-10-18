@@ -66,6 +66,11 @@ DEFINE_IRQ_VECTOR_EVENT(error_apic);
 DEFINE_IRQ_VECTOR_EVENT(x86_platform_ipi);
 
 /*
+ * mmnif_interrupt - called when HermitCore announce an arriving IP packet
+ */
+DEFINE_IRQ_VECTOR_EVENT(mmnif_interrupt);
+
+/*
  * irq_work - called when entering/exiting a irq work interrupt
  * vector handler
  */

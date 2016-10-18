@@ -1,6 +1,8 @@
 obj-y		:= hermit.o mmnif.o
 clean-files	:= boot.h boot.bin
 
+CFLAGS_mmnif.o := -I$(src)/../include/asm/trace
+
 $(obj)/hermit.o: $(obj)/boot.h
 
 $(obj)/boot.bin: $(src)/boot.asm

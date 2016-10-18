@@ -290,7 +290,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		 * set base, limit and cpu frequency in HermitCore's kernel
 		 */
 		*((uint64_t*) (hermit_base[isle] + 0x08)) = (uint64_t) virt_to_phys(hermit_base[isle]);
-		*((uint64_t*) (hermit_base[isle] + 0x10)) = (uint64_t) virt_to_phys(hermit_base[isle]) + pool_size / num_possible_nodes();
+		*((uint64_t*) (hermit_base[isle] + 0x10)) = (uint64_t) virt_to_phys(hermit_base[isle]) + pool_size / max_isle;
 		*((uint32_t*) (hermit_base[isle] + 0x18)) = tsc_khz / 1000;
 		*((uint32_t*) (hermit_base[isle] + 0x1C)) = apicid;
 		*((uint32_t*) (hermit_base[isle] + 0x24)) = total_cpus;
@@ -302,7 +302,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		*((uint64_t*) (hermit_base[isle] + 0x50)) = (uint64_t) header_phy_start_address;
 		*((uint32_t*) (hermit_base[isle] + 0x58)) = heap_size;
 		*((uint32_t*) (hermit_base[isle] + 0x5c)) = header_size;
-		*((uint32_t*) (hermit_base[isle] + 0x60)) = num_possible_nodes();
+		*((uint32_t*) (hermit_base[isle] + 0x60)) = max_isle;
 		*((uint64_t*) (hermit_base[isle] + 0x64)) = (uint64_t) heap_phy_start_address;
 		*((uint64_t*) (hermit_base[isle] + 0x6c)) = (uint64_t) header_phy_start_address;
 		if (x2apic_enabled())
@@ -601,7 +601,7 @@ static ssize_t hermit_set_path(struct kobject *kobj, struct kobj_attribute *attr
 static ssize_t hermit_get_memsize(struct kobject *kobj, struct kobj_attribute *attr,
                                 char *buf)
 {
-	return sprintf(buf, "%zd K per isle\n", pool_size / (1024 * num_possible_nodes()));
+	return sprintf(buf, "%zd K per isle\n", (pool_size / max_isle) >> 10);
 }
 
 /*
