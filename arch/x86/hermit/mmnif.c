@@ -508,21 +508,16 @@ static inline void __mmnif_interrupt(struct pt_regs *regs)
 
 __visible void smp_mmnif_interrupt(struct pt_regs *regs)
 {
-	struct pt_regs *old_regs = set_irq_regs(regs);
-
 	entering_ack_irq();
 	inc_irq_stat(irq_mmnif_count);
 
 	__mmnif_interrupt(regs);
 
 	exiting_irq();
-	set_irq_regs(old_regs);
 }
 
 __visible void smp_trace_mmnif_interrupt(struct pt_regs *regs)
 {
-	struct pt_regs *old_regs = set_irq_regs(regs);
-
 	entering_ack_irq();
 	inc_irq_stat(irq_mmnif_count);
 	trace_mmnif_interrupt_entry(MMNIF_VECTOR);
@@ -531,7 +526,6 @@ __visible void smp_trace_mmnif_interrupt(struct pt_regs *regs)
 
 	trace_mmnif_interrupt_exit(MMNIF_VECTOR);
 	exiting_irq();
-	set_irq_regs(old_regs);
 }
 
 static int mmnif_thread(void* data)
