@@ -71,6 +71,7 @@ static struct kobject *isle_kobj[NR_CPUS] = {[0 ... NR_CPUS-1] = NULL};
 static int hcpu_online[NR_CPUS] = {[0 ... NR_CPUS-1] = -1};
 static char* path2hermit[MAX_NUMNODES] = {[0 ... MAX_NUMNODES-1] = NULL};
 static char* hermit_base[1 << NODES_SHIFT] = {[0 ... (1 << NODES_SHIFT)-1] = NULL};
+static char* hermit_hbmem_base[1 << NODES_SHIFT] = {[0 ... (1 << NODES_SHIFT)-1] = NULL};
 static arch_spinlock_t boot_lock = __ARCH_SPIN_LOCK_UNLOCKED;
 static size_t pool_size = 0x80000000ULL;
 
@@ -82,6 +83,7 @@ static char* heap_phy_start_address = NULL;
 static void* phy_isle_locks = NULL;
 static void* phy_rcce_internals = NULL;
 static int max_isle = 0;
+static size_t hbmem_size = 0;
 unsigned int isle_counter = 0;
 
 /* tramploline to boot a CPU */
@@ -307,7 +309,9 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 		*((uint64_t*) (hermit_base[isle] + 0x6c)) = (uint64_t) header_phy_start_address;
 		if (x2apic_enabled())
 			*((uint32_t*) (hermit_base[isle] + 0x74)) = 0;
-		 *((uint32_t*) (hermit_base[isle] + 0x78)) = 0;
+		*((uint32_t*) (hermit_base[isle] + 0x78)) = 0;
+		*((uint64_t*) (hermit_base[isle] + 0x84)) = (uint64_t) virt_to_phys(hermit_hbmem_base[isle]);
+		*((uint64_t*) (hermit_base[isle] + 0x8C)) = (uint64_t) hbmem_size;
 	}
 
 	*((uint32_t*) (hermit_base[isle] + 0x30)) = apicid;
@@ -704,6 +708,23 @@ int hermit_is_enabled(void)
 	return enable_hermit;
 }
 
+static int set_hermit_hbmem_size(char *arg)
+{
+	hbmem_size = memparse(arg, NULL);
+	return 0;
+}
+early_param("hermit_hbmem_size", set_hermit_hbmem_size);
+
+static int hermit_snc = 0;
+static int set_hermit_snc(char *arg)
+{
+	hermit_snc = simple_strtol(arg, NULL, 10);
+	if (!((hermit_snc == 2) || (hermit_snc == 4)))
+		hermit_snc = 0;
+	return 0;
+}
+early_param("hermit_snc", set_hermit_snc);
+
 int __init hermit_init(void)
 {
 	int i, ret;
@@ -724,6 +745,10 @@ int __init hermit_init(void)
 	pr_notice("Number of available nodes: %d\n", num_possible_nodes());
 	pr_notice("Number of isle: %d\n", max_isle);
 	pr_notice("Pool size: 0x%zx KiB\n", pool_size >> 10);
+	if (hermit_snc) {
+		pr_notice("HB memm size: 0x%zx KiB per node\n", hbmem_size >> 10);
+		pr_notice("Usage of SNC mode %d\n", hermit_snc);
+	}
 
 	rdmsrl(MSR_IA32_MISC_ENABLE, msr);
 	pr_notice("MSR_IA32_MISC_ENABLE: 0x%llx\n", msr);
@@ -811,6 +836,25 @@ int __init hermit_init(void)
 
 		hermit_base[i] = (char*) phys_to_virt(mem);
 		pr_notice("HermitCore %d at 0x%p (0x%zx)\n", i, hermit_base[i], (size_t) mem);
+
+		if (hermit_snc) {
+			mem = memblock_find_in_range_node(4 << 20, 0x10000ULL << 20, hbmem_size, 2 << 20, i+hermit_snc);
+			if (!mem) {
+				pr_notice("HermitCore is not able to find a hbmem block of 0x%zx KiB at node %d\n", hbmem_size >> 10, i+hermit_snc);
+				ret = -ENOMEM;
+				goto _exit;
+			}
+
+			ret = memblock_reserve(mem, hbmem_size);
+			if (ret) {
+				pr_notice("HermitCore isn't able to reserve hbmem block at node %d\n", i+hermit_snc);
+				ret = -ENOMEM;
+				goto _exit;
+			}
+
+			hermit_hbmem_base[i] = (char*) phys_to_virt(mem);
+			pr_notice("HermitCore %d hbmem at 0x%p (0x%zx)\n", i, hermit_hbmem_base[i], (size_t) mem);
+		}
 	}
 
 	/*
