@@ -114,42 +114,6 @@ void hermit_get_mmnif_data(struct mmnif_private* priv)
 	priv->rx_buff->dcount = MMNIF_MAX_DESCRIPTORS;
 }
 
-#if 0
-static inline void smpboot_setup_warm_reset_vector(unsigned long start_eip)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&rtc_lock, flags);
-	CMOS_WRITE(0xa, 0xf);
-	spin_unlock_irqrestore(&rtc_lock, flags);
-	local_flush_tlb();
-	*((volatile unsigned short *)phys_to_virt(DEFAULT_TRAMPOLINE_PHYS_HIGH)) =
-							start_eip >> 4;
-	*((volatile unsigned short *)phys_to_virt(DEFAULT_TRAMPOLINE_PHYS_LOW)) =
-							start_eip & 0xf;
-}
-
-static inline void smpboot_restore_warm_reset_vector(void)
-{
-	unsigned long flags;
-
-	/*
-	 * Install writable page 0 entry to set BIOS data area.
-	 */
-	local_flush_tlb();
-
-	/*
-	 * Paranoid:  Set warm reset code and vector here back
-	 * to default values.
-	 */
-	spin_lock_irqsave(&rtc_lock, flags);
-	CMOS_WRITE(0, 0xf);
-	spin_unlock_irqrestore(&rtc_lock, flags);
-
-	*((volatile u32 *)phys_to_virt(DEFAULT_TRAMPOLINE_PHYS_LOW)) = 0;
-}
-#endif
-
 static ssize_t load_elf(const char *filen, char *base)
 {
 	struct file *file;
@@ -241,8 +205,13 @@ found:
 static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 {
 	unsigned long flags;
-	unsigned int start_eip;
+	unsigned int start_ip;
 	int apicid = apic->cpu_present_to_apicid(cpu);
+
+	if (apicid == BAD_APICID) {
+		pr_debug("Ups, invalid apic id (%d) for cpu %d\n", apicid, cpu);
+		return -EINVAL;
+	}
 
 	if (cpu_online(cpu)) {
 		pr_debug("Shutdown cpu %d\n", cpu);
@@ -254,7 +223,7 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 	if (!hermit_trampoline)
 		return -EINVAL;
 
-	start_eip = (unsigned int) virt_to_phys(hermit_trampoline);
+	start_ip = (unsigned int) virt_to_phys(hermit_trampoline);
 
 	if (!hermit_base[isle])
 		return -ENOMEM;
@@ -268,16 +237,16 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 	memcpy(hermit_trampoline, boot_code, sizeof(boot_code));
 
 	/* relocate code */
-	*((uint16_t*) (hermit_trampoline+0x04)) += (unsigned short) start_eip;
-	*((uint32_t*) (hermit_trampoline+0x10)) += start_eip;
-	*((uint32_t*) (hermit_trampoline+0x29)) += start_eip;
-	*((uint32_t*) (hermit_trampoline+0x2E)) += start_eip;
-	*((uint32_t*) (hermit_trampoline+0x3A)) += start_eip;
-	*((uint64_t*) (hermit_trampoline+0x5A)) += (uint64_t) start_eip;
+	*((uint16_t*) (hermit_trampoline+0x04)) += (unsigned short) start_ip;
+	*((uint32_t*) (hermit_trampoline+0x10)) += start_ip;
+	*((uint32_t*) (hermit_trampoline+0x29)) += start_ip;
+	*((uint32_t*) (hermit_trampoline+0x2E)) += start_ip;
+	*((uint32_t*) (hermit_trampoline+0x3A)) += start_ip;
+	*((uint64_t*) (hermit_trampoline+0x5A)) += (uint64_t) start_ip;
 	*((uint32_t*) (hermit_trampoline+0xCE)) += (uint32_t) (virt_to_phys(hermit_base[isle]) & 0xFFFFFFFF);
 	*((uint32_t*) (hermit_trampoline+0xDD)) += (uint32_t) (virt_to_phys(hermit_base[isle]) >> 32);
-	*((uint32_t*) (hermit_trampoline+0x183)) += start_eip;
-	*((uint32_t*) (hermit_trampoline+0x192)) += start_eip;
+	*((uint32_t*) (hermit_trampoline+0x183)) += start_ip;
+	*((uint32_t*) (hermit_trampoline+0x192)) += start_ip;
 
 	if (!cpu_counter) {
 		ssize_t sz;
@@ -316,38 +285,22 @@ static int boot_hermit_core(int cpu, int isle, int cpu_counter, int total_cpus)
 
 	*((uint32_t*) (hermit_base[isle] + 0x30)) = apicid;
 
-#if 1
 	// reuse wakeup code from Linux
 	local_irq_save(flags);
-	wakeup_secondary_cpu_via_init(apicid, start_eip);
+	/*
+	 * Wake up a CPU in difference cases:
+	 * - Use the method in the APIC driver if it's defined
+	 * Otherwise,
+	 * - Use an INIT boot APIC message for APs or NMI for BSP.
+	 */
+        /*if (apic->wakeup_secondary_cpu)
+		apic->wakeup_secondary_cpu(apicid, start_ip);
+	else */
+		wakeup_secondary_cpu_via_init(apicid, start_ip);
 	local_irq_restore(flags);
 
 	cpu_counter++;
 	while(*((volatile uint32_t*) (hermit_base[isle] + 0x20)) < cpu_counter) { cpu_relax(); }
-#else
-	smpboot_setup_warm_reset_vector(start_eip);
-	smp_mb();
-
-	/*
-	 * use the universal startup algorithm of Intel's MultiProcessor Specification
-	 */
-	apic_icr_write(APIC_INT_LEVELTRIG|APIC_INT_ASSERT|APIC_DM_INIT, apicid);
-	udelay(200);
-	/* reset INIT */
-	apic_icr_write(APIC_INT_LEVELTRIG|APIC_DM_INIT, apicid);
-	udelay(10000);
-	/* send out the startup */
-	apic_icr_write(APIC_DM_STARTUP|(start_eip >> 12), apicid);
-	udelay(200);
-	/* do it again */
-	apic_icr_write(APIC_DM_STARTUP|(start_eip >> 12), apicid);
-	udelay(200);
-
-	cpu_counter++;
-	while(*((volatile uint32_t*) (hermit_base[isle] + 0x20)) < cpu_counter) { cpu_relax(); }
-
-	smpboot_restore_warm_reset_vector();
-#endif
 
 	return 0;
 }
@@ -388,9 +341,12 @@ static inline int apic_send_ipi(int dest, uint8_t irq)
 {
 	int apicid = apic->cpu_present_to_apicid(dest);
 
+	if (apicid == BAD_APICID)
+		return -EINVAL;
+
 	apic_icr_write(APIC_INT_ASSERT|APIC_DM_FIXED|irq, apicid);
 
-        return 0;
+	return 0;
 }
 
 static inline int shutdown_hermit_core(unsigned cpu)
@@ -820,7 +776,7 @@ int __init hermit_init(void)
 
 	/* allocate for each HermitCore instance */
 	for(i=0; i<max_isle; i++) {
-		mem = memblock_find_in_range_node(4 << 20, 0x10000ULL << 20, pool_size / max_isle, 2 << 20, i);
+		mem = memblock_find_in_range_node(4 << 20, MEMBLOCK_ALLOC_ACCESSIBLE, pool_size / max_isle, 2 << 20, i);
 		if (!mem) {
 			pr_notice("HermitCore is not able to find a block of 0x%zx KiB at node %d\n", (pool_size / max_isle) >> 10, i);
 			ret = -ENOMEM;
@@ -838,7 +794,7 @@ int __init hermit_init(void)
 		pr_notice("HermitCore %d at 0x%p (0x%zx)\n", i, hermit_base[i], (size_t) mem);
 
 		if (hermit_snc) {
-			mem = memblock_find_in_range_node(4 << 20, 0x10000ULL << 20, hbmem_size, 2 << 20, i+hermit_snc);
+			mem = memblock_find_in_range_node(4 << 20, MEMBLOCK_ALLOC_ACCESSIBLE, hbmem_size, 2 << 20, i+hermit_snc);
 			if (!mem) {
 				pr_notice("HermitCore is not able to find a hbmem block of 0x%zx KiB at node %d\n", hbmem_size >> 10, i+hermit_snc);
 				ret = -ENOMEM;
