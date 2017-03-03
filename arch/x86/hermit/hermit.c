@@ -82,7 +82,7 @@ static char* header_phy_start_address = NULL;
 static char* heap_phy_start_address = NULL;
 static void* phy_isle_locks = NULL;
 static void* phy_rcce_internals = NULL;
-static int max_isle = 0;
+static int max_isle = -1;
 static size_t hbmem_size = 0;
 unsigned int isle_counter = 0;
 
