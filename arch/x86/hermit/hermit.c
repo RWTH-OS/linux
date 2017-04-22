@@ -153,6 +153,7 @@ static ssize_t load_elf(const char *filen, char *base)
 
 	int i;
 	ssize_t sz, pos, bytes;
+	ssize_t memsz;
 	loff_t offset;
 
 	if (!filen)
@@ -201,6 +202,7 @@ static ssize_t load_elf(const char *filen, char *base)
 		if (phdr.p_type == PT_LOAD) {
 			offset = phdr.p_offset;
 			sz     = phdr.p_filesz;
+			memsz  = phdr.p_memsz;
 
 			goto found;
 		}
@@ -227,7 +229,7 @@ found:
 
 	filp_close(file, NULL);
 
-	return sz;
+	return memsz;
 }
 
 /*
