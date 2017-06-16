@@ -795,7 +795,7 @@ int __init hermit_init(void)
 		hermit_base[i] = (char*) phys_to_virt(mem);
 		pr_notice("HermitCore %d at 0x%p (0x%zx)\n", i, hermit_base[i], (size_t) mem);
 
-		if (hermit_snc) {
+		if (hermit_snc && hbmem_size) {
 			mem = memblock_find_in_range_node(4 << 20, MEMBLOCK_ALLOC_ACCESSIBLE, hbmem_size, 2 << 20, i+hermit_snc);
 			if (!mem) {
 				pr_notice("HermitCore is not able to find a hbmem block of 0x%zx KiB at node %d\n", hbmem_size >> 10, i+hermit_snc);
