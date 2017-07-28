@@ -185,15 +185,17 @@ out:
 	return -EIO;
 
 found:
-	pr_debug("Loading HermitCore's kernel image with a size of %d KiB\n", (int) sz >> 10);
+	pr_debug("Loading HermitCore's kernel image with a size of %zd KiB (memory size %zd KiB)\n", sz >> 10, memsz >> 10);
 
 	/* Load kernel to hermit_base */
 	for (pos=0; pos<sz; pos+=bytes) {
 		bytes = kernel_read(file, offset, base + pos, sz - pos);
 		if (bytes == 0)
 			break;
-		if (bytes < 0)
+		if (bytes < 0) {
+			pr_debug("Unable to read elf file: err %zd\n", bytes);
 			goto out;
+		}
 	}
 
 	filp_close(file, NULL);
