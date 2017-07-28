@@ -391,14 +391,27 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 	}
 
 	if (cpus[1] < 0) {
+		uint8_t found_isle = 0;
+
 		pr_debug("Try to shutdown HermitCore on isle %d\n", isle);
 
 		arch_spin_lock(&boot_lock);
 
 		// Ok, we have to shutdown the isle
 		for(i=0; i<NR_CPUS; i++)  {
-			if (hcpu_online[i] == isle)
+			if (hcpu_online[i] == isle) {
 				shutdown_hermit_core(i);
+				found_isle = 1;
+			}
+		}
+
+		// do we found a valid core for isle?
+		if (!found_isle) {
+			pr_debug("HermitCore's isle %d isn't used!\n", isle);
+
+			arch_spin_unlock(&boot_lock);
+			kfree(cpus);
+			return count;
 		}
 
 		while (*((volatile uint32_t*) (hermit_base[isle] + 0x20)) > 0) {
@@ -427,7 +440,7 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 
 		arch_spin_unlock(&boot_lock);
 
-		pr_debug("HermitCore %d is down!\n", isle);
+		pr_debug("HermitCore's isle %d is down!\n", isle);
 		kfree(cpus);
 
 		return count;
@@ -459,26 +472,60 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 
 	arch_spin_lock(&boot_lock);
 
+	// be sure that the cpu counter is 0
+	*((volatile uint32_t*) (hermit_base[isle] + 0x20)) = 0;
+
 	/* reserve CPU for our isle */
 	for(i=0; i<possible_cpus; i++) {
 		ret = boot_hermit_core(cpus[i+1], isle, i, possible_cpus);
-		if (!ret)
+		if (!ret) {
 			hcpu_online[cpus[i+1]] = isle;
+		} else {
+			cpu_up(cpus[i+1]);
+			break;
+		}
 	}
 
-	isle_counter++;
-	if (isle_counter == 1)
-		mmnif_set_carrier(true);
+	if (!ret) {
+		isle_counter++;
+		if (isle_counter == 1)
+			mmnif_set_carrier(true);
 
-	arch_spin_unlock(&boot_lock);
+		arch_spin_unlock(&boot_lock);
 
-	tick1 = get_cycles();
+		tick1 = get_cycles();
 
-	pr_debug("HermitCore requires %lld ms (%lld ticks) to boot the system\n", (tick1-tick0) / cpu_khz, tick1-tick0);
+		pr_debug("HermitCore requires %lld ms (%lld ticks) to boot the system\n", (tick1-tick0) / cpu_khz, tick1-tick0);
 
-	kfree(cpus);
+		kfree(cpus);
 
-	return count;
+		return count;
+	} else {
+		// if we are not able to boot the HermitCore => reboot system for Linux
+		for(i=0; i<NR_CPUS; i++)  {
+                        if (hcpu_online[i] == isle)
+				shutdown_hermit_core(i);
+		}
+
+		while (*((volatile uint32_t*) (hermit_base[isle] + 0x20)) > 0) {
+                        cpu_relax();
+		}
+
+		for(i=0; i<NR_CPUS; i++)  {
+			if (hcpu_online[i] == isle) {
+				hcpu_online[i] = -1;
+				ret = cpu_up(i);
+				if (ret)
+					pr_notice("HermitCore isn't able to restart Linux! cpu_up(%d) returns %d\n", i, ret);
+			}
+		}
+
+		arch_spin_unlock(&boot_lock);
+				
+		kfree(cpus);
+
+		return -EINVAL;
+	}
 }
 
 /*
