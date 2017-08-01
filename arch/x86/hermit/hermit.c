@@ -377,15 +377,16 @@ static ssize_t hermit_set_cpus(struct kobject *kobj, struct kobj_attribute *attr
 
 	kfree(path);
 
-	cpus = (int*) kmalloc(NR_CPUS*sizeof(int), GFP_KERNEL);
+	// the array is too large to store it on the stack
+	cpus = (int*) kmalloc((NR_CPUS+1)*sizeof(int), GFP_KERNEL);
 	if (!cpus)
 		return -ENOMEM;
 
-	get_options(buf, NR_CPUS, cpus);
+	get_options(buf, (NR_CPUS+1)*sizeof(int), cpus);
 
 	// How many cpus do we activate?
 	possible_cpus = cpus[0];
-	if ((possible_cpus <= 0) || (possible_cpus >= NR_CPUS)) {
+	if (possible_cpus <= 0) {
 		kfree(cpus);
 		return -EINVAL;
 	}
